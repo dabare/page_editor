@@ -706,6 +706,8 @@
       let canvas = null;
 
       const SIDEBAR_STATE_KEY = "pageDesignEditorSidebarStateV1";
+      const MAX_EXPORT_SIDE_PX = 14000;
+      const MAX_EXPORT_PIXELS = 120000000;
       let copiedObject = null;
       let selectedPageSizeKey = "a4";
       let selectedOrientation = "portrait";
@@ -782,7 +784,14 @@
       function safeAction(action, failurePrefix) {
         return function () {
           try {
-            return action.apply(null, arguments);
+            const result = action.apply(null, arguments);
+            if (result && typeof result.then === "function") {
+              return result.catch((error) => {
+                const detail = error && error.message ? ": " + error.message : "";
+                setStatus(failurePrefix + detail);
+              });
+            }
+            return result;
           } catch (error) {
             const detail = error && error.message ? ": " + error.message : "";
             setStatus(failurePrefix + detail);
@@ -808,23 +817,92 @@
         return object.type || "Object";
       }
 
-      function makeDownload(filename, dataUrl) {
-        const link = document.createElement("a");
-        link.href = dataUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      }
-
       function getSelectedExportDpi() {
         const raw = Number(exportDpiSelect && exportDpiSelect.value);
         if (!Number.isFinite(raw)) return 300;
         return clampNumber(raw, 100, 1200, 300);
       }
 
-      function getExportMultiplier() {
-        return getSelectedExportDpi() / PX_PER_INCH;
+      function uniqueDescending(values) {
+        const seen = new Set();
+        const result = [];
+        values.forEach((value) => {
+          const rounded = Number(value.toFixed(4));
+          if (!Number.isFinite(rounded) || rounded <= 0.2) return;
+          if (seen.has(rounded)) return;
+          seen.add(rounded);
+          result.push(rounded);
+        });
+        return result.sort((a, b) => b - a);
+      }
+
+      function computeSafeExportMultiplier(requestedMultiplier) {
+        const baseWidth = Math.max(1, canvas.getWidth());
+        const baseHeight = Math.max(1, canvas.getHeight());
+        const sideLimited = Math.min(MAX_EXPORT_SIDE_PX / baseWidth, MAX_EXPORT_SIDE_PX / baseHeight);
+        const areaLimited = Math.sqrt(MAX_EXPORT_PIXELS / (baseWidth * baseHeight));
+        const maxAllowed = Math.min(sideLimited, areaLimited);
+
+        if (!Number.isFinite(maxAllowed) || maxAllowed <= 0) {
+          return requestedMultiplier;
+        }
+        return Math.min(requestedMultiplier, maxAllowed);
+      }
+
+      function createExportCanvasForDpi(requestedDpi) {
+        canvas.discardActiveObject();
+        canvas.requestRenderAll();
+
+        const requestedMultiplier = requestedDpi / PX_PER_INCH;
+        const safeMultiplier = computeSafeExportMultiplier(requestedMultiplier);
+        const attempts = uniqueDescending([
+          safeMultiplier,
+          safeMultiplier * 0.9,
+          safeMultiplier * 0.8,
+          safeMultiplier * 0.7,
+          safeMultiplier * 0.6,
+          safeMultiplier * 0.5
+        ]);
+
+        for (const multiplier of attempts) {
+          try {
+            const rendered = canvas.toCanvasElement(multiplier);
+            if (!rendered || rendered.width < 1 || rendered.height < 1) {
+              continue;
+            }
+            return {
+              canvas: rendered,
+              actualDpi: Math.max(1, Math.round(multiplier * PX_PER_INCH)),
+              requestedDpi
+            };
+          } catch (error) {
+          }
+        }
+
+        throw new Error("Export resolution is too high for this browser/device. Try a lower DPI.");
+      }
+
+      function canvasToBlobAsync(sourceCanvas, type, quality) {
+        return new Promise((resolve, reject) => {
+          sourceCanvas.toBlob((blob) => {
+            if (!blob) {
+              reject(new Error("Failed to create export file."));
+              return;
+            }
+            resolve(blob);
+          }, type, quality);
+        });
+      }
+
+      function downloadBlob(filename, blob) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
 
       function refreshLayers() {
@@ -1158,16 +1236,16 @@
         reader.readAsText(file);
       }
 
-      function exportPng() {
+      async function exportPng() {
         const selectedDpi = getSelectedExportDpi();
-        const exportMultiplier = getExportMultiplier();
-        const dataUrl = canvas.toDataURL({
-          format: "png",
-          multiplier: exportMultiplier,
-          enableRetinaScaling: true
-        });
-        makeDownload("page-design.png", dataUrl);
-        setStatus("PNG exported at " + selectedDpi + " DPI.");
+        const rendered = createExportCanvasForDpi(selectedDpi);
+        const blob = await canvasToBlobAsync(rendered.canvas, "image/png");
+        downloadBlob("page-design.png", blob);
+        if (rendered.actualDpi !== selectedDpi) {
+          setStatus("PNG exported at " + rendered.actualDpi + " DPI (requested " + selectedDpi + ").");
+          return;
+        }
+        setStatus("PNG exported at " + rendered.actualDpi + " DPI.");
       }
 
       function exportPdf() {
@@ -1180,20 +1258,19 @@
         const spec = getPageSpec(selectedPageSizeKey, selectedOrientation);
         const [pageWidthMm, pageHeightMm] = spec.mm;
         const selectedDpi = getSelectedExportDpi();
-        const exportMultiplier = getExportMultiplier();
-        const dataUrl = canvas.toDataURL({
-          format: "png",
-          multiplier: exportMultiplier,
-          enableRetinaScaling: true
-        });
+        const rendered = createExportCanvasForDpi(selectedDpi);
         const doc = new jsPdfRoot.jsPDF({
           orientation: selectedOrientation === "portrait" ? "p" : "l",
           unit: "mm",
           format: [pageWidthMm, pageHeightMm]
         });
-        doc.addImage(dataUrl, "PNG", 0, 0, pageWidthMm, pageHeightMm);
+        doc.addImage(rendered.canvas, "PNG", 0, 0, pageWidthMm, pageHeightMm, undefined, "FAST");
         doc.save("page-design.pdf");
-        setStatus("PDF exported at " + selectedDpi + " DPI.");
+        if (rendered.actualDpi !== selectedDpi) {
+          setStatus("PDF exported at " + rendered.actualDpi + " DPI (requested " + selectedDpi + ").");
+          return;
+        }
+        setStatus("PDF exported at " + rendered.actualDpi + " DPI.");
       }
 
       function moveZ(direction) {
