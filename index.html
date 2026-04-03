@@ -31,6 +31,7 @@
       --left-sidebar-width: 230px;
       --right-sidebar-width: 320px;
       --sidebar-collapsed-width: 34px;
+      --ruler-size: 44px;
     }
 
     * {
@@ -206,9 +207,81 @@
       overflow: auto;
     }
 
-    .canvas-wrap {
+    .editor-stage {
       width: fit-content;
       margin: 0 auto;
+      display: grid;
+      grid-template-columns: var(--ruler-size) auto;
+      grid-template-rows: var(--ruler-size) auto;
+      align-items: start;
+      justify-items: start;
+      gap: 0;
+    }
+
+    .ruler-corner {
+      grid-column: 1;
+      grid-row: 1;
+      width: var(--ruler-size);
+      height: var(--ruler-size);
+      border: 1px solid #c7d8c8;
+      border-right: 0;
+      border-bottom: 0;
+      background: #edf4ed;
+    }
+
+    .ruler {
+      position: relative;
+      color: #345640;
+      background: #f4faf3;
+      overflow: hidden;
+    }
+
+    .ruler-top {
+      grid-column: 2;
+      grid-row: 1;
+      height: var(--ruler-size);
+      border: 1px solid #c7d8c8;
+      border-bottom: 0;
+    }
+
+    .ruler-left {
+      grid-column: 1;
+      grid-row: 2;
+      width: var(--ruler-size);
+      border: 1px solid #c7d8c8;
+      border-right: 0;
+      overflow: visible;
+    }
+
+    .ruler-tick {
+      position: absolute;
+      background: #5a7c66;
+      opacity: 0.82;
+    }
+
+    .ruler-label {
+      position: absolute;
+      font-size: 9px;
+      line-height: 1;
+      color: #345640;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      pointer-events: none;
+      user-select: none;
+      opacity: 0.9;
+      white-space: nowrap;
+    }
+
+    .ruler-left .ruler-label {
+      right: 4px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .canvas-wrap {
+      grid-column: 2;
+      grid-row: 2;
+      width: fit-content;
       padding: 22px;
       border-radius: 18px;
       border: 1px solid rgba(22, 51, 32, 0.12);
@@ -333,6 +406,18 @@
       font-weight: 700;
     }
 
+    .top-action-field input {
+      border: 1px solid #c7d8c6;
+      border-radius: 10px;
+      background: #ffffff;
+      color: var(--ink);
+      min-height: 34px;
+      padding: 6px 8px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      width: 100%;
+    }
+
     .grid-2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -348,6 +433,76 @@
       min-height: 36px;
       display: flex;
       align-items: center;
+    }
+
+    .preview-exit {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 2000;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      background: rgba(15, 15, 15, 0.74);
+      color: #fff;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      display: none;
+    }
+
+    body.is-preview .preview-exit {
+      display: inline-block;
+    }
+
+    body.is-preview {
+      padding: 0;
+      background: #1d2320;
+    }
+
+    body.is-preview .app {
+      width: 100%;
+      min-height: 100vh;
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      background: #1d2320;
+    }
+
+    body.is-preview .topbar,
+    body.is-preview .ad-strip,
+    body.is-preview .side,
+    body.is-preview .statusbar,
+    body.is-preview .ruler,
+    body.is-preview .ruler-corner {
+      display: none !important;
+    }
+
+    body.is-preview .shell {
+      grid-template-columns: 1fr !important;
+      min-height: 100vh;
+    }
+
+    body.is-preview .canvas-zone {
+      padding: 26px;
+      display: grid;
+      place-items: start center;
+      background:
+        radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.09), transparent 40%),
+        linear-gradient(180deg, #252e28, #1d2320);
+    }
+
+    body.is-preview .editor-stage {
+      grid-template-columns: auto;
+      grid-template-rows: auto;
+    }
+
+    body.is-preview .canvas-wrap {
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
     }
 
     .ad-strip {
@@ -456,6 +611,21 @@
       .right {
         border-top: 0;
       }
+
+      .editor-stage {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+      }
+
+      .ruler,
+      .ruler-corner {
+        display: none;
+      }
+
+      .canvas-wrap {
+        grid-column: 1;
+        grid-row: 1;
+      }
     }
   </style>
 </head>
@@ -467,6 +637,13 @@
       </div>
       <div class="top-actions">
         <div class="top-action-field">
+          <label for="rulerUnitSelect">Ruler Unit</label>
+          <select id="rulerUnitSelect">
+            <option value="cm" selected>cm</option>
+            <option value="in">inch</option>
+          </select>
+        </div>
+        <div class="top-action-field">
           <label for="exportDpiSelect">Export DPI</label>
           <select id="exportDpiSelect">
             <option value="1200">1200</option>
@@ -477,6 +654,11 @@
             <option value="100">100</option>
           </select>
         </div>
+        <div class="top-action-field">
+          <label for="realSizePercentInput">Real Size %</label>
+          <input id="realSizePercentInput" type="number" min="50" max="400" step="1" value="100">
+        </div>
+        <button id="calibrateSizeButton">Calibrate Size</button>
         <button id="newDesignButton">New</button>
         <button id="saveJsonButton">Save JSON</button>
         <button id="saveAiJsonButton">Export AI JSON</button>
@@ -486,6 +668,7 @@
         <button id="copyAiPromptButton">Copy AI Prompt</button>
         <button id="exportPngButton" class="primary">Export PNG</button>
         <button id="exportPdfButton" class="primary">Export PDF</button>
+        <button id="previewModeButton">Preview</button>
       </div>
     </div>
 
@@ -548,14 +731,22 @@
             Delete: remove selected object<br>
             Ctrl/Cmd + C then Ctrl/Cmd + V: copy/paste<br>
             Ctrl/Cmd + D: duplicate selected<br>
-            AI JSON: page-design-ai-v1 via Load JSON
+            AI JSON: page-design-ai-v1 via Load JSON<br>
+            Preview: click Preview, press Esc to exit<br>
+            Ruler unit: switch cm/inch in top bar<br>
+            Real-size mismatch: use Calibrate Size
           </p>
         </div>
       </aside>
 
       <main class="canvas-zone">
-        <div class="canvas-wrap">
-          <canvas id="designCanvas" width="794" height="1123" aria-label="Design canvas"></canvas>
+        <div class="editor-stage" id="editorStage">
+          <div class="ruler-corner"></div>
+          <div class="ruler ruler-top" id="rulerTop" aria-hidden="true"></div>
+          <div class="ruler ruler-left" id="rulerLeft" aria-hidden="true"></div>
+          <div class="canvas-wrap" id="canvasWrap">
+            <canvas id="designCanvas" width="794" height="1123" aria-label="Design canvas"></canvas>
+          </div>
         </div>
       </main>
 
@@ -641,6 +832,7 @@
 
     <div class="statusbar" id="statusText">Ready.</div>
   </div>
+  <button id="previewExitButton" type="button" class="preview-exit">Exit Preview</button>
 
   <input id="imageInput" type="file" accept="image/*" class="hidden">
   <input id="jsonInput" type="file" accept=".json,application/json" class="hidden">
@@ -692,6 +884,10 @@
 
       const canvasEl = document.getElementById("designCanvas");
       const appShell = document.getElementById("appShell");
+      const editorStage = document.getElementById("editorStage");
+      const canvasWrap = document.getElementById("canvasWrap");
+      const rulerTop = document.getElementById("rulerTop");
+      const rulerLeft = document.getElementById("rulerLeft");
       const leftSidebar = document.getElementById("leftSidebar");
       const rightSidebar = document.getElementById("rightSidebar");
       const leftSidebarHandle = document.getElementById("leftSidebarHandle");
@@ -717,6 +913,11 @@
       const downloadAiSchemaButton = document.getElementById("downloadAiSchemaButton");
       const downloadAiTemplateButton = document.getElementById("downloadAiTemplateButton");
       const copyAiPromptButton = document.getElementById("copyAiPromptButton");
+      const previewModeButton = document.getElementById("previewModeButton");
+      const previewExitButton = document.getElementById("previewExitButton");
+      const rulerUnitSelect = document.getElementById("rulerUnitSelect");
+      const realSizePercentInput = document.getElementById("realSizePercentInput");
+      const calibrateSizeButton = document.getElementById("calibrateSizeButton");
       const jsonInput = document.getElementById("jsonInput");
       const exportDpiSelect = document.getElementById("exportDpiSelect");
       const exportPngButton = document.getElementById("exportPngButton");
@@ -741,6 +942,8 @@
       let canvas = null;
 
       const SIDEBAR_STATE_KEY = "pageDesignEditorSidebarStateV1";
+      const REAL_SIZE_PERCENT_KEY = "pageDesignEditorRealSizePercentV1";
+      const RULER_UNIT_KEY = "pageDesignEditorRulerUnitV1";
       const MAX_EXPORT_SIDE_PX = 14000;
       const MAX_EXPORT_PIXELS = 120000000;
       const AI_PROJECT_SCHEMA_VERSION = 1;
@@ -860,6 +1063,9 @@
       let copiedObject = null;
       let selectedPageSizeKey = "a4";
       let selectedOrientation = "portrait";
+      let isPreviewMode = false;
+      let rulerUnit = "cm";
+      let realSizePercent = 100;
       let sidebarState = {
         leftCollapsed: false,
         rightCollapsed: false
@@ -867,6 +1073,352 @@
 
       function setStatus(message) {
         statusText.textContent = message;
+      }
+
+      function getCurrentPageSpec() {
+        return getPageSpec(selectedPageSizeKey, selectedOrientation);
+      }
+
+      function saveRealSizePercent() {
+        try {
+          localStorage.setItem(REAL_SIZE_PERCENT_KEY, String(realSizePercent));
+        } catch (error) {
+        }
+      }
+
+      function loadRealSizePercent() {
+        try {
+          const raw = localStorage.getItem(REAL_SIZE_PERCENT_KEY);
+          if (!raw) {
+            realSizePercent = 100;
+            return;
+          }
+          realSizePercent = clampNumber(Number(raw), 50, 400, 100);
+        } catch (error) {
+          realSizePercent = 100;
+        }
+      }
+
+      function applyRealSizePercent(value, persist) {
+        realSizePercent = clampNumber(Number(value), 50, 400, 100);
+        if (realSizePercentInput) {
+          realSizePercentInput.value = String(Math.round(realSizePercent));
+        }
+        if (persist) {
+          saveRealSizePercent();
+        }
+      }
+
+      function parseMmInput(value) {
+        if (value == null) return NaN;
+        const normalized = String(value).trim().replace(",", ".");
+        return Number(normalized);
+      }
+
+      function calibratePreviewScale() {
+        if (!canvas) return;
+        if (!isPreviewMode) {
+          setPreviewMode(true);
+        }
+        const spec = getCurrentPageSpec();
+        const targetWidthMm = spec.mm[0];
+        const message =
+          "Calibration: place a real " + spec.label + " sheet on screen over preview.\n" +
+          "Measure preview page width in millimeters and enter it:";
+        const measuredRaw = window.prompt(message, targetWidthMm.toFixed(1));
+        if (measuredRaw == null) {
+          setStatus("Calibration cancelled.");
+          return;
+        }
+        const measuredMm = parseMmInput(measuredRaw);
+        if (!Number.isFinite(measuredMm) || measuredMm <= 0) {
+          setStatus("Calibration failed: enter a valid measured width in mm.");
+          return;
+        }
+        const nextPercent = clampNumber(
+          (realSizePercent * targetWidthMm) / measuredMm,
+          50,
+          400,
+          realSizePercent
+        );
+        applyRealSizePercent(nextPercent, true);
+        syncCanvasDisplayMode();
+        setStatus(
+          "Preview calibrated to " +
+          Math.round(realSizePercent) +
+          "%. If needed, run Calibrate Size again."
+        );
+      }
+
+      function saveRulerUnit() {
+        try {
+          localStorage.setItem(RULER_UNIT_KEY, rulerUnit);
+        } catch (error) {
+        }
+      }
+
+      function loadRulerUnit() {
+        try {
+          const raw = localStorage.getItem(RULER_UNIT_KEY);
+          rulerUnit = raw === "in" ? "in" : "cm";
+        } catch (error) {
+          rulerUnit = "cm";
+        }
+      }
+
+      function applyRulerUnit(value, persist) {
+        rulerUnit = value === "in" ? "in" : "cm";
+        if (rulerUnitSelect) {
+          rulerUnitSelect.value = rulerUnit;
+        }
+        if (persist) {
+          saveRulerUnit();
+        }
+        window.requestAnimationFrame(updateRulers);
+      }
+
+      function getRulerMetric(displayPx, logicalMm) {
+        if (!Number.isFinite(displayPx) || !Number.isFinite(logicalMm) || displayPx <= 0 || logicalMm <= 0) {
+          return 0;
+        }
+        return displayPx / logicalMm;
+      }
+
+      function clearNode(node) {
+        if (!node) return;
+        while (node.firstChild) {
+          node.removeChild(node.firstChild);
+        }
+      }
+
+      function createTick(className, styles) {
+        const tick = document.createElement("span");
+        tick.className = "ruler-tick " + className;
+        Object.assign(tick.style, styles);
+        return tick;
+      }
+
+      function createLabel(text, styles) {
+        const label = document.createElement("span");
+        label.className = "ruler-label";
+        label.textContent = text;
+        Object.assign(label.style, styles);
+        return label;
+      }
+
+      function getRulerTicks(totalMm) {
+        const ticks = [];
+        if (rulerUnit === "in") {
+          const stepMm = MM_PER_INCH / 8;
+          const steps = Math.floor(totalMm / stepMm);
+          for (let i = 0; i <= steps; i += 1) {
+            const mm = i * stepMm;
+            const fraction = i % 8;
+            let level = "minor";
+            if (fraction === 0) {
+              level = "major";
+            } else if (fraction === 4) {
+              level = "mid";
+            } else if (fraction === 2 || fraction === 6) {
+              level = "quarter";
+            }
+            const label = fraction === 0 && i > 0 ? String(Math.round(i / 8)) : "";
+            ticks.push({ mm, level, label });
+          }
+          const last = ticks[ticks.length - 1];
+          if (!last || totalMm - last.mm > stepMm * 0.35) {
+            ticks.push({
+              mm: totalMm,
+              level: "major",
+              label: (totalMm / MM_PER_INCH).toFixed(1)
+            });
+          }
+          return ticks;
+        }
+
+        const wholeMm = Math.floor(totalMm);
+        for (let mm = 0; mm <= wholeMm; mm += 1) {
+          let level = "minor";
+          if (mm % 10 === 0) {
+            level = "major";
+          } else if (mm % 5 === 0) {
+            level = "mid";
+          }
+          const label = mm % 10 === 0 && mm > 0 ? String(mm / 10) : "";
+          ticks.push({ mm, level, label });
+        }
+        const last = ticks[ticks.length - 1];
+        if (!last || totalMm - last.mm > 0.5) {
+          ticks.push({
+            mm: totalMm,
+            level: "major",
+            label: (totalMm / 10).toFixed(1)
+          });
+        }
+        return ticks;
+      }
+
+      function updateRulers() {
+        if (!canvas || !canvas.wrapperEl || !rulerTop || !rulerLeft || !canvasWrap || window.matchMedia("(max-width: 820px)").matches || isPreviewMode) {
+          return;
+        }
+
+        const spec = getCurrentPageSpec();
+        const canvasRect = canvas.wrapperEl.getBoundingClientRect();
+        const wrapRect = canvasWrap.getBoundingClientRect();
+        const displayWidth = canvasRect.width;
+        const displayHeight = canvasRect.height;
+        const offsetX = Math.max(0, canvasRect.left - wrapRect.left);
+        const offsetY = Math.max(0, canvasRect.top - wrapRect.top);
+        const pxPerMmX = getRulerMetric(displayWidth, spec.mm[0]);
+        const pxPerMmY = getRulerMetric(displayHeight, spec.mm[1]);
+        if (pxPerMmX <= 0 || pxPerMmY <= 0) {
+          return;
+        }
+
+        rulerTop.style.width = displayWidth + "px";
+        rulerTop.style.marginLeft = offsetX + "px";
+        rulerLeft.style.height = displayHeight + "px";
+        rulerLeft.style.marginTop = offsetY + "px";
+        clearNode(rulerTop);
+        clearNode(rulerLeft);
+
+        const horizontalTicks = getRulerTicks(spec.mm[0]);
+        const verticalTicks = getRulerTicks(spec.mm[1]);
+        const tickLengthByLevel = {
+          major: 14,
+          mid: 10,
+          quarter: 8,
+          minor: 6
+        };
+
+        rulerTop.appendChild(
+          createLabel(rulerUnit, {
+            left: "2px",
+            top: "2px"
+          })
+        );
+        rulerLeft.appendChild(
+          createLabel(rulerUnit, {
+            right: "4px",
+            top: "2px"
+          })
+        );
+
+        horizontalTicks.forEach((tick) => {
+          const x = tick.mm * pxPerMmX;
+          const tickHeight = tickLengthByLevel[tick.level] || 6;
+          rulerTop.appendChild(
+            createTick("tick-top", {
+              left: x + "px",
+              bottom: "0",
+              width: "1px",
+              height: tickHeight + "px"
+            })
+          );
+          if (tick.label) {
+            const labelX = Math.min(displayWidth - 14, Math.max(2, x + 2));
+            rulerTop.appendChild(
+              createLabel(tick.label, {
+                left: labelX + "px",
+                top: "2px"
+              })
+            );
+          }
+        });
+
+        verticalTicks.forEach((tick) => {
+          const y = tick.mm * pxPerMmY;
+          const tickWidth = tickLengthByLevel[tick.level] || 6;
+          rulerLeft.appendChild(
+            createTick("tick-left", {
+              top: y + "px",
+              right: "0",
+              height: "1px",
+              width: tickWidth + "px"
+            })
+          );
+          if (tick.label) {
+            const labelHeight = 11;
+            const labelY = Math.min(displayHeight - labelHeight - 1, Math.max(2, y - (labelHeight / 2)));
+            rulerLeft.appendChild(
+              createLabel(tick.label, {
+                right: "4px",
+                top: labelY + "px"
+              })
+            );
+          }
+        });
+      }
+
+      function syncCanvasDisplayMode() {
+        if (!canvas || !canvas.wrapperEl) return;
+        const wrapper = canvas.wrapperEl;
+        const lower = canvas.lowerCanvasEl;
+        const upper = canvas.upperCanvasEl;
+        const widthPx = canvas.getWidth();
+        const heightPx = canvas.getHeight();
+        const spec = getCurrentPageSpec();
+        const previewScaleFactor = clampNumber(realSizePercent / 100, 0.5, 2, 1);
+
+        if (isPreviewMode) {
+          wrapper.style.width = (spec.mm[0] * previewScaleFactor).toFixed(2) + "mm";
+          wrapper.style.height = (spec.mm[1] * previewScaleFactor).toFixed(2) + "mm";
+          if (lower) {
+            lower.style.width = "100%";
+            lower.style.height = "100%";
+          }
+          if (upper) {
+            upper.style.width = "100%";
+            upper.style.height = "100%";
+            upper.style.pointerEvents = "none";
+          }
+        } else {
+          wrapper.style.width = widthPx + "px";
+          wrapper.style.height = heightPx + "px";
+          if (lower) {
+            lower.style.width = widthPx + "px";
+            lower.style.height = heightPx + "px";
+          }
+          if (upper) {
+            upper.style.width = widthPx + "px";
+            upper.style.height = heightPx + "px";
+            upper.style.pointerEvents = "auto";
+          }
+        }
+
+        canvas.calcOffset();
+        canvas.requestRenderAll();
+        window.requestAnimationFrame(updateRulers);
+      }
+
+      function updatePreviewButtons() {
+        if (previewModeButton) {
+          previewModeButton.textContent = isPreviewMode ? "Exit Preview" : "Preview";
+        }
+        if (previewExitButton) {
+          previewExitButton.hidden = !isPreviewMode;
+        }
+      }
+
+      function setPreviewMode(enabled) {
+        isPreviewMode = Boolean(enabled);
+        document.body.classList.toggle("is-preview", isPreviewMode);
+        updatePreviewButtons();
+        syncCanvasDisplayMode();
+        if (isPreviewMode) {
+          setStatus(
+            "Preview mode on. Real size scale: " +
+            Math.round(realSizePercent) +
+            "% (use browser zoom 100% for best accuracy)."
+          );
+        } else {
+          setStatus("Preview mode off.");
+        }
+      }
+
+      function togglePreviewMode() {
+        setPreviewMode(!isPreviewMode);
       }
 
       function saveSidebarState() {
@@ -918,6 +1470,7 @@
           rightSidebar.classList.toggle("is-collapsed", rightCollapsed);
         }
         updateSidebarHandleStates(leftCollapsed, rightCollapsed, isCompact);
+        window.requestAnimationFrame(updateRulers);
       }
 
       function toggleSidebar(side) {
@@ -1159,7 +1712,7 @@
 
         selectedPageSizeKey = spec.key;
         selectedOrientation = orientation;
-        canvas.requestRenderAll();
+        syncCanvasDisplayMode();
         updatePageSizeHint();
         setStatus("Canvas resized to " + spec.label + " (" + orientation + ").");
       }
@@ -1882,6 +2435,13 @@
       }
 
       function setupEvents() {
+        if (previewModeButton) {
+          previewModeButton.addEventListener("click", safeAction(togglePreviewMode, "Preview toggle failed"));
+        }
+        if (previewExitButton) {
+          previewExitButton.addEventListener("click", safeAction(() => setPreviewMode(false), "Preview exit failed"));
+        }
+
         if (leftSidebarHandle) {
           leftSidebarHandle.addEventListener("click", safeAction(() => toggleSidebar("left"), "Left toolbar toggle failed"));
         }
@@ -1939,6 +2499,25 @@
         exportDpiSelect.addEventListener("change", () => {
           setStatus("Export DPI set to " + getSelectedExportDpi() + ".");
         });
+        if (rulerUnitSelect) {
+          rulerUnitSelect.addEventListener("change", safeAction(() => {
+            applyRulerUnit(rulerUnitSelect.value, true);
+            setStatus("Ruler unit set to " + (rulerUnit === "in" ? "inch" : "cm") + ".");
+          }, "Ruler unit change failed"));
+        }
+        if (realSizePercentInput) {
+          realSizePercentInput.addEventListener("change", safeAction(() => {
+            applyRealSizePercent(realSizePercentInput.value, true);
+            syncCanvasDisplayMode();
+            setStatus("Real size scale set to " + Math.round(realSizePercent) + "%.");
+          }, "Real size calibration failed"));
+        }
+        if (calibrateSizeButton) {
+          calibrateSizeButton.addEventListener(
+            "click",
+            safeAction(calibratePreviewScale, "Preview calibration failed")
+          );
+        }
 
         pageSizeSelect.addEventListener("change", () => {
           applyPageSize(pageSizeSelect.value, orientationSelect.value, true);
@@ -1980,6 +2559,14 @@
         canvas.on("object:removed", updateInspector);
 
         document.addEventListener("keydown", (event) => {
+          if (isPreviewMode) {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setPreviewMode(false);
+            }
+            return;
+          }
+
           const active = document.activeElement;
           const isTyping =
             active &&
@@ -2022,7 +2609,10 @@
           }
         });
 
-        window.addEventListener("resize", renderSidebarState);
+        window.addEventListener("resize", () => {
+          renderSidebarState();
+          syncCanvasDisplayMode();
+        });
       }
 
       function init() {
@@ -2032,12 +2622,17 @@
           stopContextMenu: true
         });
 
+        loadRulerUnit();
+        applyRulerUnit(rulerUnit, false);
+        loadRealSizePercent();
+        applyRealSizePercent(realSizePercent, false);
         loadSidebarState();
         renderSidebarState();
+        updatePreviewButtons();
         populatePageSizes();
         applyPageSize("a4", "portrait", false);
         canvas.backgroundColor = "#ffffff";
-        canvas.requestRenderAll();
+        syncCanvasDisplayMode();
         setupEvents();
         initGoogleAds();
         updateInspector();
