@@ -14,6 +14,8 @@
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Page Design Editor">
   <meta name="twitter:description" content="Local visual editor for printable page layouts with multiple paper sizes and PDF/PNG export.">
+  <meta name="google-adsense-account" content="ca-pub-XXXXXXXXXXXXXXXX">
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXXX" crossorigin="anonymous"></script>
   <style>
     :root {
       --bg-1: #eef3ea;
@@ -348,6 +350,21 @@
       align-items: center;
     }
 
+    .ad-strip {
+      padding: 10px 16px 0;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.62);
+    }
+
+    .ad-slot {
+      width: 100%;
+      min-height: 90px;
+      border: 1px dashed #c8d9c9;
+      border-radius: 12px;
+      background: rgba(252, 255, 252, 0.88);
+      overflow: hidden;
+    }
+
     .layers {
       max-height: 250px;
       overflow: auto;
@@ -462,10 +479,23 @@
         </div>
         <button id="newDesignButton">New</button>
         <button id="saveJsonButton">Save JSON</button>
+        <button id="saveAiJsonButton">Export AI JSON</button>
         <button id="loadJsonButton">Load JSON</button>
+        <button id="downloadAiSchemaButton">AI Schema</button>
+        <button id="downloadAiTemplateButton">AI Template</button>
+        <button id="copyAiPromptButton">Copy AI Prompt</button>
         <button id="exportPngButton" class="primary">Export PNG</button>
         <button id="exportPdfButton" class="primary">Export PDF</button>
       </div>
+    </div>
+
+    <div class="ad-strip">
+      <ins class="adsbygoogle ad-slot"
+        style="display:block"
+        data-ad-client="ca-pub-XXXXXXXXXXXXXXXX"
+        data-ad-slot="1234567890"
+        data-ad-format="auto"
+        data-full-width-responsive="true"></ins>
     </div>
 
     <div class="shell" id="appShell">
@@ -517,7 +547,8 @@
           <p class="hint">
             Delete: remove selected object<br>
             Ctrl/Cmd + C then Ctrl/Cmd + V: copy/paste<br>
-            Ctrl/Cmd + D: duplicate selected
+            Ctrl/Cmd + D: duplicate selected<br>
+            AI JSON: page-design-ai-v1 via Load JSON
           </p>
         </div>
       </aside>
@@ -681,7 +712,11 @@
       const deleteButton = document.getElementById("deleteButton");
       const newDesignButton = document.getElementById("newDesignButton");
       const saveJsonButton = document.getElementById("saveJsonButton");
+      const saveAiJsonButton = document.getElementById("saveAiJsonButton");
       const loadJsonButton = document.getElementById("loadJsonButton");
+      const downloadAiSchemaButton = document.getElementById("downloadAiSchemaButton");
+      const downloadAiTemplateButton = document.getElementById("downloadAiTemplateButton");
+      const copyAiPromptButton = document.getElementById("copyAiPromptButton");
       const jsonInput = document.getElementById("jsonInput");
       const exportDpiSelect = document.getElementById("exportDpiSelect");
       const exportPngButton = document.getElementById("exportPngButton");
@@ -708,6 +743,120 @@
       const SIDEBAR_STATE_KEY = "pageDesignEditorSidebarStateV1";
       const MAX_EXPORT_SIDE_PX = 14000;
       const MAX_EXPORT_PIXELS = 120000000;
+      const AI_PROJECT_SCHEMA_VERSION = 1;
+      const AI_PROJECT_SCHEMA = {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        $id: "https://page-design-editor.local/schemas/ai-project-v1.json",
+        title: "Page Design Editor AI Project",
+        type: "object",
+        required: ["spec", "version", "pageSize", "orientation", "elements"],
+        properties: {
+          spec: { const: "page-design-ai-v1" },
+          version: { type: "integer", const: AI_PROJECT_SCHEMA_VERSION },
+          pageSize: { type: "string" },
+          orientation: { type: "string", enum: ["portrait", "landscape"] },
+          backgroundColor: { type: "string" },
+          elements: {
+            type: "array",
+            items: {
+              oneOf: [
+                {
+                  type: "object",
+                  required: ["kind", "text", "x", "y"],
+                  properties: {
+                    kind: { const: "text" },
+                    text: { type: "string" },
+                    x: { type: "number" },
+                    y: { type: "number" },
+                    width: { type: "number" },
+                    height: { type: "number" },
+                    fontSize: { type: "number" },
+                    fontFamily: { type: "string" },
+                    fontWeight: { type: ["string", "number"] },
+                    fontStyle: { type: "string" },
+                    textAlign: { type: "string" },
+                    fill: { type: "string" },
+                    stroke: { type: "string" },
+                    strokeWidth: { type: "number" },
+                    opacity: { type: "number" },
+                    angle: { type: "number" }
+                  }
+                },
+                {
+                  type: "object",
+                  required: ["kind", "x", "y", "width", "height"],
+                  properties: {
+                    kind: { const: "rect" },
+                    x: { type: "number" },
+                    y: { type: "number" },
+                    width: { type: "number" },
+                    height: { type: "number" },
+                    rx: { type: "number" },
+                    ry: { type: "number" },
+                    fill: { type: "string" },
+                    stroke: { type: "string" },
+                    strokeWidth: { type: "number" },
+                    opacity: { type: "number" },
+                    angle: { type: "number" }
+                  }
+                },
+                {
+                  type: "object",
+                  required: ["kind", "x", "y", "radius"],
+                  properties: {
+                    kind: { const: "circle" },
+                    x: { type: "number" },
+                    y: { type: "number" },
+                    radius: { type: "number" },
+                    fill: { type: "string" },
+                    stroke: { type: "string" },
+                    strokeWidth: { type: "number" },
+                    opacity: { type: "number" },
+                    angle: { type: "number" }
+                  }
+                },
+                {
+                  type: "object",
+                  required: ["kind", "x1", "y1", "x2", "y2"],
+                  properties: {
+                    kind: { const: "line" },
+                    x1: { type: "number" },
+                    y1: { type: "number" },
+                    x2: { type: "number" },
+                    y2: { type: "number" },
+                    left: { type: "number" },
+                    top: { type: "number" },
+                    stroke: { type: "string" },
+                    strokeWidth: { type: "number" },
+                    opacity: { type: "number" },
+                    angle: { type: "number" }
+                  }
+                },
+                {
+                  type: "object",
+                  required: ["kind", "src", "x", "y"],
+                  properties: {
+                    kind: { const: "image" },
+                    src: { type: "string" },
+                    x: { type: "number" },
+                    y: { type: "number" },
+                    width: { type: "number" },
+                    height: { type: "number" },
+                    opacity: { type: "number" },
+                    angle: { type: "number" }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      };
+      const AI_PROMPT_TEMPLATE =
+        "Generate JSON for Page Design Editor using spec page-design-ai-v1. " +
+        "Use keys: spec, version, pageSize, orientation, backgroundColor, elements. " +
+        "Each element kind can be text, rect, circle, line, or image. " +
+        "Use x/y in editor pixels (96 DPI canvas), valid pageSize values from the tool (a3,a4,a5,a6,b4,b5,letter,legal,tabloid,executive,statement,folio). " +
+        "Use hex colors where possible. Keep numbers finite. Output strict JSON only, no markdown.";
       let copiedObject = null;
       let selectedPageSizeKey = "a4";
       let selectedOrientation = "portrait";
@@ -903,6 +1052,22 @@
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+
+      function initGoogleAds() {
+        if (!window.adsbygoogle || !Array.isArray(window.adsbygoogle)) {
+          return;
+        }
+        const adNodes = document.querySelectorAll(".adsbygoogle");
+        adNodes.forEach((node) => {
+          try {
+            if (node.getAttribute("data-ad-status")) {
+              return;
+            }
+            (window.adsbygoogle = window.adsbygoogle || []).push({});
+          } catch (error) {
+          }
+        });
       }
 
       function refreshLayers() {
@@ -1189,6 +1354,394 @@
         canvas.requestRenderAll();
       }
 
+      function downloadJsonFile(filename, payload) {
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        downloadBlob(filename, blob);
+      }
+
+      function getProjectMetaFromData(data) {
+        const orientation = data && data.orientation === "landscape" ? "landscape" : "portrait";
+        const pageSize = data && PAGE_SIZES[data.pageSize] ? data.pageSize : "a4";
+        const backgroundColor = normalizeColor(data && data.backgroundColor, "#ffffff");
+        return { orientation, pageSize, backgroundColor };
+      }
+
+      function applyProjectMeta(meta) {
+        pageSizeSelect.value = meta.pageSize;
+        orientationSelect.value = meta.orientation;
+        applyPageSize(meta.pageSize, meta.orientation, false);
+        backgroundColorInput.value = meta.backgroundColor;
+        canvas.backgroundColor = meta.backgroundColor;
+      }
+
+      function getSafeColor(value, fallback) {
+        if (typeof value !== "string" || !value.trim()) return fallback;
+        return value.trim();
+      }
+
+      function toFiniteNumber(value, fallback) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+      }
+
+      function buildAiElementFromObject(object) {
+        const left = toFiniteNumber(object.left, 0);
+        const top = toFiniteNumber(object.top, 0);
+        const width = Math.max(1, toFiniteNumber((object.width || 1) * (object.scaleX || 1), 1));
+        const height = Math.max(1, toFiniteNumber((object.height || 1) * (object.scaleY || 1), 1));
+        const opacity = clampNumber(toFiniteNumber(object.opacity, 1), 0, 1, 1);
+        const angle = toFiniteNumber(object.angle, 0);
+
+        if (object.type === "i-text" || object.type === "textbox" || object.type === "text") {
+          return {
+            kind: "text",
+            text: String(object.text || ""),
+            x: left,
+            y: top,
+            width,
+            height,
+            fontSize: toFiniteNumber(object.fontSize, 36),
+            fontFamily: object.fontFamily || "Arial",
+            fontWeight: object.fontWeight || "400",
+            fontStyle: object.fontStyle || "normal",
+            textAlign: object.textAlign || "left",
+            fill: getSafeColor(object.fill, "#1f2937"),
+            stroke: getSafeColor(object.stroke, ""),
+            strokeWidth: toFiniteNumber(object.strokeWidth, 0),
+            opacity,
+            angle
+          };
+        }
+
+        if (object.type === "rect") {
+          return {
+            kind: "rect",
+            x: left,
+            y: top,
+            width,
+            height,
+            rx: toFiniteNumber(object.rx, 0),
+            ry: toFiniteNumber(object.ry, 0),
+            fill: getSafeColor(object.fill, "#e8f4e7"),
+            stroke: getSafeColor(object.stroke, "#2f7a47"),
+            strokeWidth: toFiniteNumber(object.strokeWidth, 0),
+            opacity,
+            angle
+          };
+        }
+
+        if (object.type === "circle") {
+          return {
+            kind: "circle",
+            x: left,
+            y: top,
+            radius: Math.max(1, toFiniteNumber((object.radius || 1) * (object.scaleX || 1), 1)),
+            fill: getSafeColor(object.fill, "#d6ead5"),
+            stroke: getSafeColor(object.stroke, "#2f7a47"),
+            strokeWidth: toFiniteNumber(object.strokeWidth, 0),
+            opacity,
+            angle
+          };
+        }
+
+        if (object.type === "line") {
+          return {
+            kind: "line",
+            x1: toFiniteNumber(object.x1, 0) * (object.scaleX || 1),
+            y1: toFiniteNumber(object.y1, 0) * (object.scaleY || 1),
+            x2: toFiniteNumber(object.x2, 120) * (object.scaleX || 1),
+            y2: toFiniteNumber(object.y2, 0) * (object.scaleY || 1),
+            left,
+            top,
+            stroke: getSafeColor(object.stroke, "#264d35"),
+            strokeWidth: toFiniteNumber(object.strokeWidth, 1),
+            opacity,
+            angle
+          };
+        }
+
+        if (object.type === "image") {
+          const source = typeof object.getSrc === "function" ? object.getSrc() : "";
+          return {
+            kind: "image",
+            src: source || "",
+            x: left,
+            y: top,
+            width,
+            height,
+            opacity,
+            angle
+          };
+        }
+
+        return null;
+      }
+
+      function buildAiProjectPayload() {
+        const elements = canvas.getObjects()
+          .map((object) => buildAiElementFromObject(object))
+          .filter((item) => Boolean(item));
+        return {
+          spec: "page-design-ai-v1",
+          version: AI_PROJECT_SCHEMA_VERSION,
+          pageSize: selectedPageSizeKey,
+          orientation: selectedOrientation,
+          backgroundColor: backgroundColorInput.value,
+          elements
+        };
+      }
+
+      function buildAiTemplatePayload() {
+        return {
+          spec: "page-design-ai-v1",
+          version: AI_PROJECT_SCHEMA_VERSION,
+          pageSize: "a4",
+          orientation: "portrait",
+          backgroundColor: "#ffffff",
+          elements: [
+            {
+              kind: "text",
+              text: "Generated by AI",
+              x: 80,
+              y: 90,
+              fontSize: 52,
+              fontFamily: "Arial",
+              fontWeight: "700",
+              fill: "#1f2937"
+            },
+            {
+              kind: "rect",
+              x: 72,
+              y: 180,
+              width: 460,
+              height: 160,
+              rx: 12,
+              ry: 12,
+              fill: "#eef7ee",
+              stroke: "#2f7a47",
+              strokeWidth: 2
+            },
+            {
+              kind: "line",
+              x1: 0,
+              y1: 0,
+              x2: 420,
+              y2: 0,
+              left: 80,
+              top: 380,
+              stroke: "#264d35",
+              strokeWidth: 3
+            }
+          ]
+        };
+      }
+
+      function saveAiJson() {
+        downloadJsonFile("page-design-ai-project.json", buildAiProjectPayload());
+        setStatus("AI JSON exported.");
+      }
+
+      function downloadAiSchema() {
+        downloadJsonFile("page-design-ai-schema-v1.json", AI_PROJECT_SCHEMA);
+        setStatus("AI schema exported.");
+      }
+
+      function downloadAiTemplate() {
+        downloadJsonFile("page-design-ai-template.json", buildAiTemplatePayload());
+        setStatus("AI template exported.");
+      }
+
+      async function copyAiPrompt() {
+        const prompt =
+          AI_PROMPT_TEMPLATE + "\n\nExample JSON:\n" + JSON.stringify(buildAiTemplatePayload(), null, 2);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(prompt);
+          setStatus("AI prompt copied.");
+          return;
+        }
+        const temp = document.createElement("textarea");
+        temp.value = prompt;
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand("copy");
+        temp.remove();
+        setStatus("AI prompt copied.");
+      }
+
+      function loadFabricProjectFromData(data) {
+        return new Promise((resolve, reject) => {
+          if (!data || typeof data !== "object" || !data.canvas) {
+            reject(new Error("Missing canvas payload"));
+            return;
+          }
+          try {
+            canvas.loadFromJSON(data.canvas, () => {
+              canvas.requestRenderAll();
+              resolve();
+            });
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+
+      function createFabricImageFromSource(src) {
+        return new Promise((resolve) => {
+          if (typeof src !== "string" || !src.trim()) {
+            resolve(null);
+            return;
+          }
+          fabric.Image.fromURL(src, (img) => {
+            resolve(img || null);
+          }, { crossOrigin: "anonymous" });
+        });
+      }
+
+      async function createFabricObjectFromAiElement(element) {
+        if (!element || typeof element !== "object") return null;
+        const kind = String(element.kind || "").toLowerCase();
+
+        if (kind === "text") {
+          const textObject = new fabric.IText(String(element.text || ""), {
+            left: toFiniteNumber(element.x, 0),
+            top: toFiniteNumber(element.y, 0),
+            fill: getSafeColor(element.fill, "#1f2937"),
+            stroke: getSafeColor(element.stroke, ""),
+            strokeWidth: Math.max(0, toFiniteNumber(element.strokeWidth, 0)),
+            fontFamily: element.fontFamily || "Arial",
+            fontSize: Math.max(6, toFiniteNumber(element.fontSize, 36)),
+            fontWeight: element.fontWeight || "400",
+            fontStyle: element.fontStyle || "normal",
+            textAlign: element.textAlign || "left",
+            opacity: clampNumber(toFiniteNumber(element.opacity, 1), 0, 1, 1),
+            angle: toFiniteNumber(element.angle, 0)
+          });
+          const targetWidth = toFiniteNumber(element.width, textObject.width || 0);
+          const targetHeight = toFiniteNumber(element.height, textObject.height || 0);
+          if (targetWidth > 0 && textObject.width) {
+            textObject.scaleX = targetWidth / textObject.width;
+          }
+          if (targetHeight > 0 && textObject.height) {
+            textObject.scaleY = targetHeight / textObject.height;
+          }
+          textObject.setCoords();
+          return textObject;
+        }
+
+        if (kind === "rect") {
+          const rect = new fabric.Rect({
+            left: toFiniteNumber(element.x, 0),
+            top: toFiniteNumber(element.y, 0),
+            width: Math.max(1, toFiniteNumber(element.width, 160)),
+            height: Math.max(1, toFiniteNumber(element.height, 90)),
+            rx: Math.max(0, toFiniteNumber(element.rx, 0)),
+            ry: Math.max(0, toFiniteNumber(element.ry, 0)),
+            fill: getSafeColor(element.fill, "#e8f4e7"),
+            stroke: getSafeColor(element.stroke, "#2f7a47"),
+            strokeWidth: Math.max(0, toFiniteNumber(element.strokeWidth, 0)),
+            opacity: clampNumber(toFiniteNumber(element.opacity, 1), 0, 1, 1),
+            angle: toFiniteNumber(element.angle, 0)
+          });
+          rect.setCoords();
+          return rect;
+        }
+
+        if (kind === "circle") {
+          const circle = new fabric.Circle({
+            left: toFiniteNumber(element.x, 0),
+            top: toFiniteNumber(element.y, 0),
+            radius: Math.max(1, toFiniteNumber(element.radius, 50)),
+            fill: getSafeColor(element.fill, "#d6ead5"),
+            stroke: getSafeColor(element.stroke, "#2f7a47"),
+            strokeWidth: Math.max(0, toFiniteNumber(element.strokeWidth, 0)),
+            opacity: clampNumber(toFiniteNumber(element.opacity, 1), 0, 1, 1),
+            angle: toFiniteNumber(element.angle, 0)
+          });
+          circle.setCoords();
+          return circle;
+        }
+
+        if (kind === "line") {
+          const line = new fabric.Line(
+            [
+              toFiniteNumber(element.x1, 0),
+              toFiniteNumber(element.y1, 0),
+              toFiniteNumber(element.x2, 240),
+              toFiniteNumber(element.y2, 0)
+            ],
+            {
+              left: toFiniteNumber(element.left, 0),
+              top: toFiniteNumber(element.top, 0),
+              stroke: getSafeColor(element.stroke, "#264d35"),
+              strokeWidth: Math.max(1, toFiniteNumber(element.strokeWidth, 2)),
+              opacity: clampNumber(toFiniteNumber(element.opacity, 1), 0, 1, 1),
+              angle: toFiniteNumber(element.angle, 0)
+            }
+          );
+          line.setCoords();
+          return line;
+        }
+
+        if (kind === "image") {
+          const image = await createFabricImageFromSource(element.src);
+          if (!image) return null;
+          const targetWidth = Math.max(1, toFiniteNumber(element.width, image.width || 200));
+          const targetHeight = Math.max(1, toFiniteNumber(element.height, image.height || 200));
+          image.set({
+            left: toFiniteNumber(element.x, 0),
+            top: toFiniteNumber(element.y, 0),
+            angle: toFiniteNumber(element.angle, 0),
+            opacity: clampNumber(toFiniteNumber(element.opacity, 1), 0, 1, 1)
+          });
+          if (image.width) {
+            image.scaleX = targetWidth / image.width;
+          }
+          if (image.height) {
+            image.scaleY = targetHeight / image.height;
+          }
+          image.setCoords();
+          return image;
+        }
+
+        return null;
+      }
+
+      async function importAiProjectData(data) {
+        const normalized = Array.isArray(data) ? { elements: data } : data;
+        if (!normalized || !Array.isArray(normalized.elements)) {
+          throw new Error("AI JSON requires an elements array.");
+        }
+
+        const meta = getProjectMetaFromData(normalized);
+        clearCanvas();
+        applyProjectMeta(meta);
+
+        let imported = 0;
+        let skipped = 0;
+        for (const element of normalized.elements) {
+          try {
+            const object = await createFabricObjectFromAiElement(element);
+            if (!object) {
+              skipped += 1;
+              continue;
+            }
+            canvas.add(object);
+            imported += 1;
+          } catch (error) {
+            skipped += 1;
+          }
+        }
+
+        canvas.requestRenderAll();
+        updateInspector();
+        setStatus(
+          "AI JSON imported. " +
+          imported +
+          " element(s)" +
+          (skipped > 0 ? ", " + skipped + " skipped." : ".")
+        );
+      }
+
       function saveProjectJson() {
         const payload = {
           version: 1,
@@ -1198,39 +1751,31 @@
           backgroundColor: backgroundColorInput.value,
           canvas: canvas.toJSON()
         };
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = "page-design-project.json";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
+        downloadJsonFile("page-design-project.json", payload);
         setStatus("Project JSON saved.");
       }
 
       function loadProjectJson(file) {
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = () => {
+        reader.onload = async () => {
           try {
             const data = JSON.parse(String(reader.result || "{}"));
-            const orientation = data.orientation === "landscape" ? "landscape" : "portrait";
-            const pageSize = PAGE_SIZES[data.pageSize] ? data.pageSize : "a4";
-            pageSizeSelect.value = pageSize;
-            orientationSelect.value = orientation;
-            applyPageSize(pageSize, orientation, false);
-            backgroundColorInput.value = normalizeColor(data.backgroundColor, "#ffffff");
-            canvas.backgroundColor = backgroundColorInput.value;
+            const isAiPayload = Array.isArray(data) || data.spec === "page-design-ai-v1" || Array.isArray(data.elements);
+            if (isAiPayload) {
+              await importAiProjectData(data);
+              return;
+            }
 
-            canvas.loadFromJSON(data.canvas, () => {
-              canvas.requestRenderAll();
-              updateInspector();
-              setStatus("Project JSON loaded.");
-            });
+            const meta = getProjectMetaFromData(data);
+            clearCanvas();
+            applyProjectMeta(meta);
+            await loadFabricProjectFromData(data);
+            updateInspector();
+            setStatus("Project JSON loaded.");
           } catch (error) {
-            setStatus("Failed to load JSON.");
+            const detail = error && error.message ? ": " + error.message : "";
+            setStatus("Failed to load JSON" + detail);
           }
         };
         reader.readAsText(file);
@@ -1378,7 +1923,11 @@
         });
 
         saveJsonButton.addEventListener("click", safeAction(saveProjectJson, "Save JSON failed"));
+        saveAiJsonButton.addEventListener("click", safeAction(saveAiJson, "Export AI JSON failed"));
         loadJsonButton.addEventListener("click", safeAction(() => jsonInput.click(), "Open JSON picker failed"));
+        downloadAiSchemaButton.addEventListener("click", safeAction(downloadAiSchema, "AI schema export failed"));
+        downloadAiTemplateButton.addEventListener("click", safeAction(downloadAiTemplate, "AI template export failed"));
+        copyAiPromptButton.addEventListener("click", safeAction(copyAiPrompt, "Copy AI prompt failed"));
         jsonInput.addEventListener("change", () => {
           const file = jsonInput.files && jsonInput.files[0];
           loadProjectJson(file);
@@ -1490,6 +2039,7 @@
         canvas.backgroundColor = "#ffffff";
         canvas.requestRenderAll();
         setupEvents();
+        initGoogleAds();
         updateInspector();
         setStatus("Page design editor ready. Fabric " + (window.fabric.version || "loaded") + ".");
       }
