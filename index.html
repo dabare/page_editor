@@ -306,6 +306,31 @@
       resize: vertical;
     }
 
+    .top-action-field {
+      display: grid;
+      gap: 4px;
+      min-width: 118px;
+    }
+
+    .top-action-field label {
+      font-size: 0.66rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 700;
+    }
+
+    .top-action-field select {
+      border: 1px solid #c7d8c6;
+      border-radius: 10px;
+      background: #ffffff;
+      color: var(--ink);
+      min-height: 34px;
+      padding: 6px 8px;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+
     .grid-2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -424,6 +449,17 @@
         <h1>Page Design Editor</h1>
       </div>
       <div class="top-actions">
+        <div class="top-action-field">
+          <label for="exportDpiSelect">Export DPI</label>
+          <select id="exportDpiSelect">
+            <option value="1200">1200</option>
+            <option value="600">600</option>
+            <option value="300" selected>300</option>
+            <option value="450">450</option>
+            <option value="200">200</option>
+            <option value="100">100</option>
+          </select>
+        </div>
         <button id="newDesignButton">New</button>
         <button id="saveJsonButton">Save JSON</button>
         <button id="loadJsonButton">Load JSON</button>
@@ -647,6 +683,7 @@
       const saveJsonButton = document.getElementById("saveJsonButton");
       const loadJsonButton = document.getElementById("loadJsonButton");
       const jsonInput = document.getElementById("jsonInput");
+      const exportDpiSelect = document.getElementById("exportDpiSelect");
       const exportPngButton = document.getElementById("exportPngButton");
       const exportPdfButton = document.getElementById("exportPdfButton");
       const statusText = document.getElementById("statusText");
@@ -778,6 +815,16 @@
         document.body.appendChild(link);
         link.click();
         link.remove();
+      }
+
+      function getSelectedExportDpi() {
+        const raw = Number(exportDpiSelect && exportDpiSelect.value);
+        if (!Number.isFinite(raw)) return 300;
+        return clampNumber(raw, 100, 1200, 300);
+      }
+
+      function getExportMultiplier() {
+        return getSelectedExportDpi() / PX_PER_INCH;
       }
 
       function refreshLayers() {
@@ -1112,13 +1159,15 @@
       }
 
       function exportPng() {
+        const selectedDpi = getSelectedExportDpi();
+        const exportMultiplier = getExportMultiplier();
         const dataUrl = canvas.toDataURL({
           format: "png",
-          multiplier: 2,
+          multiplier: exportMultiplier,
           enableRetinaScaling: true
         });
         makeDownload("page-design.png", dataUrl);
-        setStatus("PNG exported.");
+        setStatus("PNG exported at " + selectedDpi + " DPI.");
       }
 
       function exportPdf() {
@@ -1130,9 +1179,11 @@
 
         const spec = getPageSpec(selectedPageSizeKey, selectedOrientation);
         const [pageWidthMm, pageHeightMm] = spec.mm;
+        const selectedDpi = getSelectedExportDpi();
+        const exportMultiplier = getExportMultiplier();
         const dataUrl = canvas.toDataURL({
           format: "png",
-          multiplier: 2,
+          multiplier: exportMultiplier,
           enableRetinaScaling: true
         });
         const doc = new jsPdfRoot.jsPDF({
@@ -1142,7 +1193,7 @@
         });
         doc.addImage(dataUrl, "PNG", 0, 0, pageWidthMm, pageHeightMm);
         doc.save("page-design.pdf");
-        setStatus("PDF exported.");
+        setStatus("PDF exported at " + selectedDpi + " DPI.");
       }
 
       function moveZ(direction) {
@@ -1259,6 +1310,9 @@
 
         exportPngButton.addEventListener("click", safeAction(exportPng, "Export PNG failed"));
         exportPdfButton.addEventListener("click", safeAction(exportPdf, "Export PDF failed"));
+        exportDpiSelect.addEventListener("change", () => {
+          setStatus("Export DPI set to " + getSelectedExportDpi() + ".");
+        });
 
         pageSizeSelect.addEventListener("change", () => {
           applyPageSize(pageSizeSelect.value, orientationSelect.value, true);
