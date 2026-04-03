@@ -450,8 +450,47 @@
       display: none;
     }
 
+    .preview-scale-panel {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 2000;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      background: rgba(15, 15, 15, 0.74);
+      color: #fff;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      min-width: 250px;
+    }
+
+    .preview-scale-panel label {
+      opacity: 0.9;
+      white-space: nowrap;
+    }
+
+    .preview-scale-panel input[type="range"] {
+      width: 150px;
+      accent-color: #7fcf99;
+      margin: 0;
+    }
+
+    .preview-scale-panel span {
+      min-width: 44px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
     body.is-preview .preview-exit {
       display: inline-block;
+    }
+
+    body.is-preview .preview-scale-panel {
+      display: flex;
     }
 
     body.is-preview {
@@ -658,7 +697,6 @@
           <label for="realSizePercentInput">Real Size %</label>
           <input id="realSizePercentInput" type="number" min="50" max="400" step="1" value="100">
         </div>
-        <button id="calibrateSizeButton">Calibrate Size</button>
         <button id="newDesignButton">New</button>
         <button id="saveJsonButton">Save JSON</button>
         <button id="saveAiJsonButton">Export AI JSON</button>
@@ -734,7 +772,7 @@
             AI JSON: page-design-ai-v1 via Load JSON<br>
             Preview: click Preview, press Esc to exit<br>
             Ruler unit: switch cm/inch in top bar<br>
-            Real-size mismatch: use Calibrate Size
+            Preview size: use slider shown in Preview
           </p>
         </div>
       </aside>
@@ -833,6 +871,11 @@
     <div class="statusbar" id="statusText">Ready.</div>
   </div>
   <button id="previewExitButton" type="button" class="preview-exit">Exit Preview</button>
+  <div id="previewScalePanel" class="preview-scale-panel" aria-label="Preview scale control">
+    <label for="previewScaleSlider">Scale</label>
+    <input id="previewScaleSlider" type="range" min="50" max="400" step="1" value="100">
+    <span id="previewScaleValue">100%</span>
+  </div>
 
   <input id="imageInput" type="file" accept="image/*" class="hidden">
   <input id="jsonInput" type="file" accept=".json,application/json" class="hidden">
@@ -917,7 +960,8 @@
       const previewExitButton = document.getElementById("previewExitButton");
       const rulerUnitSelect = document.getElementById("rulerUnitSelect");
       const realSizePercentInput = document.getElementById("realSizePercentInput");
-      const calibrateSizeButton = document.getElementById("calibrateSizeButton");
+      const previewScaleSlider = document.getElementById("previewScaleSlider");
+      const previewScaleValue = document.getElementById("previewScaleValue");
       const jsonInput = document.getElementById("jsonInput");
       const exportDpiSelect = document.getElementById("exportDpiSelect");
       const exportPngButton = document.getElementById("exportPngButton");
@@ -1104,50 +1148,15 @@
         if (realSizePercentInput) {
           realSizePercentInput.value = String(Math.round(realSizePercent));
         }
+        if (previewScaleSlider) {
+          previewScaleSlider.value = String(Math.round(realSizePercent));
+        }
+        if (previewScaleValue) {
+          previewScaleValue.textContent = Math.round(realSizePercent) + "%";
+        }
         if (persist) {
           saveRealSizePercent();
         }
-      }
-
-      function parseMmInput(value) {
-        if (value == null) return NaN;
-        const normalized = String(value).trim().replace(",", ".");
-        return Number(normalized);
-      }
-
-      function calibratePreviewScale() {
-        if (!canvas) return;
-        if (!isPreviewMode) {
-          setPreviewMode(true);
-        }
-        const spec = getCurrentPageSpec();
-        const targetWidthMm = spec.mm[0];
-        const message =
-          "Calibration: place a real " + spec.label + " sheet on screen over preview.\n" +
-          "Measure preview page width in millimeters and enter it:";
-        const measuredRaw = window.prompt(message, targetWidthMm.toFixed(1));
-        if (measuredRaw == null) {
-          setStatus("Calibration cancelled.");
-          return;
-        }
-        const measuredMm = parseMmInput(measuredRaw);
-        if (!Number.isFinite(measuredMm) || measuredMm <= 0) {
-          setStatus("Calibration failed: enter a valid measured width in mm.");
-          return;
-        }
-        const nextPercent = clampNumber(
-          (realSizePercent * targetWidthMm) / measuredMm,
-          50,
-          400,
-          realSizePercent
-        );
-        applyRealSizePercent(nextPercent, true);
-        syncCanvasDisplayMode();
-        setStatus(
-          "Preview calibrated to " +
-          Math.round(realSizePercent) +
-          "%. If needed, run Calibrate Size again."
-        );
       }
 
       function saveRulerUnit() {
@@ -1408,7 +1417,7 @@
         syncCanvasDisplayMode();
         if (isPreviewMode) {
           setStatus(
-            "Preview mode on. Real size scale: " +
+            "Preview mode on. Use the slider (top-left). Current scale: " +
             Math.round(realSizePercent) +
             "% (use browser zoom 100% for best accuracy)."
           );
@@ -2510,13 +2519,16 @@
             applyRealSizePercent(realSizePercentInput.value, true);
             syncCanvasDisplayMode();
             setStatus("Real size scale set to " + Math.round(realSizePercent) + "%.");
-          }, "Real size calibration failed"));
+          }, "Real size scale update failed"));
         }
-        if (calibrateSizeButton) {
-          calibrateSizeButton.addEventListener(
-            "click",
-            safeAction(calibratePreviewScale, "Preview calibration failed")
-          );
+        if (previewScaleSlider) {
+          previewScaleSlider.addEventListener("input", safeAction(() => {
+            applyRealSizePercent(previewScaleSlider.value, true);
+            syncCanvasDisplayMode();
+          }, "Preview scale update failed"));
+          previewScaleSlider.addEventListener("change", safeAction(() => {
+            setStatus("Preview scale set to " + Math.round(realSizePercent) + "%.");
+          }, "Preview scale update failed"));
         }
 
         pageSizeSelect.addEventListener("change", () => {
