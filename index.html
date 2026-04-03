@@ -463,9 +463,17 @@
       font-size: 0.8rem;
       font-weight: 700;
       display: none;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      min-width: 300px;
+    }
+
+    .preview-scale-row {
+      display: flex;
       align-items: center;
       gap: 8px;
-      min-width: 250px;
+      width: 100%;
     }
 
     .preview-scale-panel label {
@@ -474,7 +482,7 @@
     }
 
     .preview-scale-panel input[type="range"] {
-      width: 150px;
+      width: 100%;
       accent-color: #7fcf99;
       margin: 0;
     }
@@ -483,6 +491,66 @@
       min-width: 44px;
       text-align: right;
       font-variant-numeric: tabular-nums;
+    }
+
+    .preview-scale-actions {
+      display: flex;
+      gap: 6px;
+      width: 100%;
+    }
+
+    .preview-scale-actions button {
+      flex: 1;
+      border: 1px solid rgba(255, 255, 255, 0.32);
+      background: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
+    .preview-scale-actions button:hover:not(:disabled) {
+      border-color: rgba(255, 255, 255, 0.58);
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    .preview-scale-actions button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .credit-card-overlay {
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      z-index: 1999;
+      display: none;
+      pointer-events: none;
+      border: 2px dashed rgba(255, 255, 255, 0.9);
+      border-radius: 10px;
+      background: linear-gradient(155deg, rgba(32, 40, 36, 0.5), rgba(82, 122, 95, 0.35));
+      box-shadow: 0 0 0 1px rgba(20, 24, 22, 0.48), 0 10px 24px rgba(0, 0, 0, 0.35);
+      overflow: hidden;
+      align-items: flex-end;
+      justify-content: center;
+    }
+
+    .credit-card-overlay .credit-card-caption {
+      width: 100%;
+      text-align: center;
+      font-size: 9px;
+      line-height: 1.2;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      color: rgba(255, 255, 255, 0.94);
+      background: rgba(14, 18, 16, 0.58);
+      padding: 2px 4px;
+      text-transform: uppercase;
+    }
+
+    body.is-preview .credit-card-overlay.is-active {
+      display: flex;
     }
 
     body.is-preview .preview-exit {
@@ -772,7 +840,8 @@
             AI JSON: page-design-ai-v1 via Load JSON<br>
             Preview: click Preview, press Esc to exit<br>
             Ruler unit: switch cm/inch in top bar<br>
-            Preview size: use slider shown in Preview
+            Preview size: use slider in Preview<br>
+            One-click real size: Card Setup once, then Use Saved
           </p>
         </div>
       </aside>
@@ -872,9 +941,18 @@
   </div>
   <button id="previewExitButton" type="button" class="preview-exit">Exit Preview</button>
   <div id="previewScalePanel" class="preview-scale-panel" aria-label="Preview scale control">
-    <label for="previewScaleSlider">Scale</label>
-    <input id="previewScaleSlider" type="range" min="50" max="400" step="1" value="100">
-    <span id="previewScaleValue">100%</span>
+    <div class="preview-scale-row">
+      <label for="previewScaleSlider">Scale</label>
+      <input id="previewScaleSlider" type="range" min="50" max="400" step="1" value="100">
+      <span id="previewScaleValue">100%</span>
+    </div>
+    <div class="preview-scale-actions">
+      <button id="cardCalibrationButton" type="button">Card Setup</button>
+      <button id="applyCardCalibrationButton" type="button" disabled>Use Saved</button>
+    </div>
+  </div>
+  <div id="creditCardOverlay" class="credit-card-overlay" aria-hidden="true">
+    <div class="credit-card-caption">Credit Card 85.60 x 53.98 mm</div>
   </div>
 
   <input id="imageInput" type="file" accept="image/*" class="hidden">
@@ -962,6 +1040,9 @@
       const realSizePercentInput = document.getElementById("realSizePercentInput");
       const previewScaleSlider = document.getElementById("previewScaleSlider");
       const previewScaleValue = document.getElementById("previewScaleValue");
+      const cardCalibrationButton = document.getElementById("cardCalibrationButton");
+      const applyCardCalibrationButton = document.getElementById("applyCardCalibrationButton");
+      const creditCardOverlay = document.getElementById("creditCardOverlay");
       const jsonInput = document.getElementById("jsonInput");
       const exportDpiSelect = document.getElementById("exportDpiSelect");
       const exportPngButton = document.getElementById("exportPngButton");
@@ -988,6 +1069,9 @@
       const SIDEBAR_STATE_KEY = "pageDesignEditorSidebarStateV1";
       const REAL_SIZE_PERCENT_KEY = "pageDesignEditorRealSizePercentV1";
       const RULER_UNIT_KEY = "pageDesignEditorRulerUnitV1";
+      const CREDIT_CARD_CALIBRATION_KEY = "pageDesignEditorCreditCardCalibrationV1";
+      const CARD_WIDTH_MM = 85.6;
+      const CARD_HEIGHT_MM = 53.98;
       const MAX_EXPORT_SIDE_PX = 14000;
       const MAX_EXPORT_PIXELS = 120000000;
       const AI_PROJECT_SCHEMA_VERSION = 1;
@@ -1108,6 +1192,8 @@
       let selectedPageSizeKey = "a4";
       let selectedOrientation = "portrait";
       let isPreviewMode = false;
+      let isCardCalibrationMode = false;
+      let savedCardCalibrationPercent = null;
       let rulerUnit = "cm";
       let realSizePercent = 100;
       let sidebarState = {
@@ -1157,6 +1243,96 @@
         if (persist) {
           saveRealSizePercent();
         }
+        syncCreditCardOverlay();
+        updateCreditCardCalibrationUi();
+      }
+
+      function saveCreditCardCalibration() {
+        try {
+          if (Number.isFinite(savedCardCalibrationPercent)) {
+            localStorage.setItem(CREDIT_CARD_CALIBRATION_KEY, String(savedCardCalibrationPercent));
+          }
+        } catch (error) {
+        }
+      }
+
+      function loadCreditCardCalibration() {
+        try {
+          const raw = localStorage.getItem(CREDIT_CARD_CALIBRATION_KEY);
+          if (!raw) {
+            savedCardCalibrationPercent = null;
+            return;
+          }
+          const parsed = clampNumber(Number(raw), 50, 400, NaN);
+          savedCardCalibrationPercent = Number.isFinite(parsed) ? parsed : null;
+        } catch (error) {
+          savedCardCalibrationPercent = null;
+        }
+      }
+
+      function syncCreditCardOverlay() {
+        if (!creditCardOverlay) return;
+        const factor = clampNumber(realSizePercent / 100, 0.5, 4, 1);
+        creditCardOverlay.style.width = (CARD_WIDTH_MM * factor).toFixed(2) + "mm";
+        creditCardOverlay.style.height = (CARD_HEIGHT_MM * factor).toFixed(2) + "mm";
+      }
+
+      function updateCreditCardCalibrationUi() {
+        if (cardCalibrationButton) {
+          cardCalibrationButton.textContent = isCardCalibrationMode
+            ? "Save Card"
+            : (Number.isFinite(savedCardCalibrationPercent) ? "Recalibrate Card" : "Card Setup");
+        }
+        if (applyCardCalibrationButton) {
+          const hasSaved = Number.isFinite(savedCardCalibrationPercent);
+          applyCardCalibrationButton.disabled = !hasSaved;
+          applyCardCalibrationButton.textContent = hasSaved
+            ? ("Use Saved (" + Math.round(savedCardCalibrationPercent) + "%)")
+            : "Use Saved";
+        }
+        if (creditCardOverlay) {
+          creditCardOverlay.classList.toggle("is-active", isPreviewMode && isCardCalibrationMode);
+        }
+      }
+
+      function toggleCardCalibrationMode() {
+        if (!canvas) return;
+        if (!isPreviewMode) {
+          setPreviewMode(true);
+        }
+        if (isCardCalibrationMode) {
+          savedCardCalibrationPercent = realSizePercent;
+          saveCreditCardCalibration();
+          isCardCalibrationMode = false;
+          updateCreditCardCalibrationUi();
+          setStatus(
+            "Credit card calibration saved at " +
+            Math.round(realSizePercent) +
+            "%. Use 'Use Saved' for one-click real-size preview."
+          );
+          return;
+        }
+        isCardCalibrationMode = true;
+        syncCreditCardOverlay();
+        updateCreditCardCalibrationUi();
+        setStatus(
+          "Card setup mode on. Place a real credit card over the guide at bottom-left, then move the scale slider and click Save Card."
+        );
+      }
+
+      function applySavedCardCalibration() {
+        if (!Number.isFinite(savedCardCalibrationPercent)) {
+          setStatus("No saved credit card calibration yet.");
+          return;
+        }
+        if (!isPreviewMode) {
+          setPreviewMode(true);
+        }
+        isCardCalibrationMode = false;
+        applyRealSizePercent(savedCardCalibrationPercent, true);
+        syncCanvasDisplayMode();
+        updateCreditCardCalibrationUi();
+        setStatus("Applied saved credit card calibration: " + Math.round(realSizePercent) + "%.");
       }
 
       function saveRulerUnit() {
@@ -1368,7 +1544,7 @@
         const widthPx = canvas.getWidth();
         const heightPx = canvas.getHeight();
         const spec = getCurrentPageSpec();
-        const previewScaleFactor = clampNumber(realSizePercent / 100, 0.5, 2, 1);
+        const previewScaleFactor = clampNumber(realSizePercent / 100, 0.5, 4, 1);
 
         if (isPreviewMode) {
           wrapper.style.width = (spec.mm[0] * previewScaleFactor).toFixed(2) + "mm";
@@ -1398,6 +1574,8 @@
 
         canvas.calcOffset();
         canvas.requestRenderAll();
+        syncCreditCardOverlay();
+        updateCreditCardCalibrationUi();
         window.requestAnimationFrame(updateRulers);
       }
 
@@ -1412,15 +1590,34 @@
 
       function setPreviewMode(enabled) {
         isPreviewMode = Boolean(enabled);
+        if (!isPreviewMode) {
+          isCardCalibrationMode = false;
+        }
+        const autoAppliedSavedCalibration =
+          isPreviewMode &&
+          !isCardCalibrationMode &&
+          Number.isFinite(savedCardCalibrationPercent);
+        if (autoAppliedSavedCalibration) {
+          applyRealSizePercent(savedCardCalibrationPercent, false);
+        }
         document.body.classList.toggle("is-preview", isPreviewMode);
         updatePreviewButtons();
         syncCanvasDisplayMode();
+        updateCreditCardCalibrationUi();
         if (isPreviewMode) {
-          setStatus(
-            "Preview mode on. Use the slider (top-left). Current scale: " +
-            Math.round(realSizePercent) +
-            "% (use browser zoom 100% for best accuracy)."
-          );
+          if (autoAppliedSavedCalibration) {
+            setStatus(
+              "Preview mode on. Saved card calibration auto-applied: " +
+              Math.round(realSizePercent) +
+              "%."
+            );
+          } else {
+            setStatus(
+              "Preview mode on. Use the slider (top-left). Current scale: " +
+              Math.round(realSizePercent) +
+              "% (use browser zoom 100% for best accuracy)."
+            );
+          }
         } else {
           setStatus("Preview mode off.");
         }
@@ -2524,11 +2721,28 @@
         if (previewScaleSlider) {
           previewScaleSlider.addEventListener("input", safeAction(() => {
             applyRealSizePercent(previewScaleSlider.value, true);
+            if (isCardCalibrationMode) {
+              savedCardCalibrationPercent = realSizePercent;
+              saveCreditCardCalibration();
+              updateCreditCardCalibrationUi();
+            }
             syncCanvasDisplayMode();
           }, "Preview scale update failed"));
           previewScaleSlider.addEventListener("change", safeAction(() => {
             setStatus("Preview scale set to " + Math.round(realSizePercent) + "%.");
           }, "Preview scale update failed"));
+        }
+        if (cardCalibrationButton) {
+          cardCalibrationButton.addEventListener(
+            "click",
+            safeAction(toggleCardCalibrationMode, "Credit card setup failed")
+          );
+        }
+        if (applyCardCalibrationButton) {
+          applyCardCalibrationButton.addEventListener(
+            "click",
+            safeAction(applySavedCardCalibration, "Apply saved card calibration failed")
+          );
         }
 
         pageSizeSelect.addEventListener("change", () => {
@@ -2634,12 +2848,14 @@
           stopContextMenu: true
         });
 
+        loadCreditCardCalibration();
         loadRulerUnit();
         applyRulerUnit(rulerUnit, false);
         loadRealSizePercent();
         applyRealSizePercent(realSizePercent, false);
         loadSidebarState();
         renderSidebarState();
+        updateCreditCardCalibrationUi();
         updatePreviewButtons();
         populatePageSizes();
         applyPageSize("a4", "portrait", false);
