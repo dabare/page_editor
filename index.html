@@ -876,6 +876,7 @@
             AI JSON: page-design-ai-v1 via Load JSON<br>
             Preview: click Preview, press Esc to exit<br>
             Ruler unit: switch cm/inch in top bar<br>
+            Move/resize snaps to ruler points<br>
             Preview size: use slider in Preview<br>
             One-click real size: Card Setup once, then Use Saved
           </p>
@@ -1247,6 +1248,7 @@
       let rulerCursorLeftGuide = null;
       let rulerCursorTopValue = null;
       let rulerCursorLeftValue = null;
+      let isApplyingScaleSnap = false;
 
       function setStatus(message) {
         statusText.textContent = message;
@@ -1425,13 +1427,69 @@
         return px / mm;
       }
 
-      function snapToRulerAxis(value, axis) {
+      function getRulerSnapStepPx(axis) {
         const pxPerMm = getCanvasPxPerMm(axis);
         const stepPx = getRulerSnapStepMm() * pxPerMm;
+        if (!Number.isFinite(stepPx) || stepPx <= 0) {
+          return 0;
+        }
+        return stepPx;
+      }
+
+      function snapLengthToRuler(valuePx, axis) {
+        const stepPx = getRulerSnapStepPx(axis);
+        if (!Number.isFinite(valuePx) || !Number.isFinite(stepPx) || stepPx <= 0) {
+          return valuePx;
+        }
+        return Math.max(stepPx, Math.round(valuePx / stepPx) * stepPx);
+      }
+
+      function snapToRulerAxis(value, axis) {
+        const stepPx = getRulerSnapStepPx(axis);
         if (!Number.isFinite(stepPx) || stepPx <= 0) {
           return value;
         }
         return Math.round(value / stepPx) * stepPx;
+      }
+
+      function snapObjectSizeToRuler(target) {
+        if (!target) return;
+        const baseWidth = Math.abs(Number(target.width) || 0);
+        const baseHeight = Math.abs(Number(target.height) || 0);
+        if (baseWidth <= 0 || baseHeight <= 0) {
+          return;
+        }
+
+        const scaleX = Number.isFinite(target.scaleX) ? target.scaleX : 1;
+        const scaleY = Number.isFinite(target.scaleY) ? target.scaleY : 1;
+        const signX = scaleX < 0 ? -1 : 1;
+        const signY = scaleY < 0 ? -1 : 1;
+        const currentWidth = baseWidth * Math.max(0.0001, Math.abs(scaleX));
+        const currentHeight = baseHeight * Math.max(0.0001, Math.abs(scaleY));
+
+        const snappedWidth = snapLengthToRuler(currentWidth, "x");
+        const snappedHeight = snapLengthToRuler(currentHeight, "y");
+        if (!Number.isFinite(snappedWidth) || !Number.isFinite(snappedHeight)) {
+          return;
+        }
+
+        const nextScaleX = signX * (snappedWidth / baseWidth);
+        const nextScaleY = signY * (snappedHeight / baseHeight);
+        if (!Number.isFinite(nextScaleX) || !Number.isFinite(nextScaleY)) {
+          return;
+        }
+
+        target.set({
+          scaleX: nextScaleX,
+          scaleY: nextScaleY
+        });
+        if (Number.isFinite(target.left)) {
+          target.set("left", snapToRulerAxis(target.left, "x"));
+        }
+        if (Number.isFinite(target.top)) {
+          target.set("top", snapToRulerAxis(target.top, "y"));
+        }
+        target.setCoords();
       }
 
       function snapCanvasPointToRuler(point) {
@@ -2975,6 +3033,16 @@
             top: snapToRulerAxis(target.top || 0, "y")
           });
           target.setCoords();
+        });
+        canvas.on("object:scaling", (event) => {
+          const target = event && event.target;
+          if (!target || isApplyingScaleSnap) return;
+          isApplyingScaleSnap = true;
+          try {
+            snapObjectSizeToRuler(target);
+          } finally {
+            isApplyingScaleSnap = false;
+          }
         });
 
         document.addEventListener("keydown", (event) => {
