@@ -939,6 +939,7 @@
             Delete: remove selected object<br>
             Ctrl/Cmd + C then Ctrl/Cmd + V: copy/paste<br>
             Ctrl/Cmd + D: duplicate selected<br>
+            Ctrl/Cmd + Z: undo, Ctrl/Cmd + Shift + Z: redo<br>
             AI JSON: page-design-ai-v1 via Load JSON<br>
             Multi-page: use Page panel Add/Duplicate/Delete<br>
             PNG export: one ZIP with all pages<br>
@@ -1019,6 +1020,10 @@
           <div class="field">
             <label for="strokeWidthInput">Stroke Width</label>
             <input id="strokeWidthInput" type="number" min="0" step="0.5">
+          </div>
+          <div class="field hidden" id="rectCornerRadiusRow">
+            <label for="rectCornerRadiusInput">Corner Radius</label>
+            <input id="rectCornerRadiusInput" type="number" min="0" step="1">
           </div>
           <div class="grid-2">
             <div class="field">
@@ -1176,6 +1181,8 @@
       const fillColorInput = document.getElementById("fillColorInput");
       const strokeColorInput = document.getElementById("strokeColorInput");
       const strokeWidthInput = document.getElementById("strokeWidthInput");
+      const rectCornerRadiusRow = document.getElementById("rectCornerRadiusRow");
+      const rectCornerRadiusInput = document.getElementById("rectCornerRadiusInput");
       const fontFamilySelect = document.getElementById("fontFamilySelect");
       const fontSizeInput = document.getElementById("fontSizeInput");
       let canvas = null;
@@ -1190,6 +1197,9 @@
       const CARD_HEIGHT_MM = 53.98;
       const MAX_EXPORT_SIDE_PX = 14000;
       const MAX_EXPORT_PIXELS = 120000000;
+      const CANVAS_TARGET_TOLERANCE_PX = 8;
+      const MIN_LINE_HIT_AREA_PX = 14;
+      const HISTORY_MAX_STEPS = 120;
       const AI_PROJECT_SCHEMA_VERSION = 1;
       const AI_PROJECT_SCHEMA = {
         $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -1331,6 +1341,9 @@
       let rulerCursorTopValue = null;
       let rulerCursorLeftValue = null;
       let isApplyingScaleSnap = false;
+      let pageHistoryMap = new Map();
+      let isHistoryApplying = false;
+      let isHistorySuspended = false;
 
       function setStatus(message) {
         statusText.textContent = message;
@@ -1338,6 +1351,189 @@
 
       function getCurrentPageSpec() {
         return getPageSpec(selectedPageSizeKey, selectedOrientation);
+      }
+
+      function applyLineHitArea(object) {
+        if (!object || object.type !== "line") return;
+        const strokeWidth = Math.max(0, Number(object.strokeWidth) || 0);
+        const requiredPadding = Math.max(0, Math.ceil((MIN_LINE_HIT_AREA_PX - strokeWidth) / 2));
+        object.set({
+          perPixelTargetFind: false,
+          padding: requiredPadding
+        });
+      }
+
+      function applyCanvasHitAreas() {
+        if (!canvas) return;
+        canvas.getObjects().forEach((object) => {
+          applyLineHitArea(object);
+        });
+      }
+
+      function normalizeHistorySnapshot(snapshot) {
+        const source = snapshot || {};
+        return {
+          pageSize: PAGE_SIZES[source.pageSize] ? source.pageSize : "a4",
+          orientation: source.orientation === "landscape" ? "landscape" : "portrait",
+          backgroundColor: normalizeColor(source.backgroundColor, "#ffffff"),
+          canvas: source.canvas ? clonePlainData(source.canvas) : createEmptyCanvasPayload()
+        };
+      }
+
+      function getCurrentHistorySnapshot() {
+        return normalizeHistorySnapshot({
+          pageSize: selectedPageSizeKey,
+          orientation: selectedOrientation,
+          backgroundColor: normalizeColor(backgroundColorInput.value, "#ffffff"),
+          canvas: canvas ? canvas.toJSON() : createEmptyCanvasPayload()
+        });
+      }
+
+      function areHistorySnapshotsEqual(a, b) {
+        return JSON.stringify(a) === JSON.stringify(b);
+      }
+
+      function getPageHistoryState(page) {
+        if (!page || !page.id) return null;
+        let state = pageHistoryMap.get(page.id);
+        if (!state) {
+          state = {
+            undo: [],
+            redo: []
+          };
+          pageHistoryMap.set(page.id, state);
+        }
+        return state;
+      }
+
+      function resetProjectHistory() {
+        pageHistoryMap = new Map();
+      }
+
+      function seedProjectHistoryFromPages() {
+        resetProjectHistory();
+        pages.forEach((page) => {
+          const state = getPageHistoryState(page);
+          if (!state) return;
+          state.undo.push(normalizeHistorySnapshot({
+            pageSize: page.pageSize,
+            orientation: page.orientation,
+            backgroundColor: page.backgroundColor,
+            canvas: page.canvas
+          }));
+          state.redo = [];
+        });
+      }
+
+      function ensureCurrentPageHistorySeed() {
+        const page = pages[currentPageIndex];
+        if (!page) return;
+        const state = getPageHistoryState(page);
+        if (!state) return;
+        if (!state.undo.length) {
+          state.undo.push(getCurrentHistorySnapshot());
+          state.redo = [];
+        }
+      }
+
+      function recordHistoryCheckpoint() {
+        if (isHistorySuspended || isHistoryApplying) return;
+        const page = pages[currentPageIndex];
+        if (!page) return;
+        const state = getPageHistoryState(page);
+        if (!state) return;
+
+        const snapshot = getCurrentHistorySnapshot();
+        const last = state.undo[state.undo.length - 1];
+        if (last && areHistorySnapshotsEqual(last, snapshot)) {
+          return;
+        }
+
+        state.undo.push(snapshot);
+        if (state.undo.length > HISTORY_MAX_STEPS) {
+          state.undo.shift();
+        }
+        state.redo = [];
+      }
+
+      async function applyHistorySnapshot(snapshot) {
+        const normalized = normalizeHistorySnapshot(snapshot);
+        const previousApplying = isHistoryApplying;
+        const previousSuspended = isHistorySuspended;
+        isHistoryApplying = true;
+        isHistorySuspended = true;
+        try {
+          pageSizeSelect.value = normalized.pageSize;
+          orientationSelect.value = normalized.orientation;
+          backgroundColorInput.value = normalized.backgroundColor;
+          applyPageSize(normalized.pageSize, normalized.orientation, false, true);
+          canvas.backgroundColor = normalized.backgroundColor;
+          await loadCanvasPayload(normalized.canvas);
+          saveCurrentPageState();
+          updateInspector();
+          renderMeasurementOverlay();
+        } finally {
+          isHistorySuspended = previousSuspended;
+          isHistoryApplying = previousApplying;
+        }
+      }
+
+      async function undoCurrentPage() {
+        ensureCurrentPageHistorySeed();
+        const page = pages[currentPageIndex];
+        if (!page) return;
+        const state = getPageHistoryState(page);
+        if (!state || !state.undo.length) {
+          setStatus("Nothing to undo.");
+          return;
+        }
+
+        const current = getCurrentHistorySnapshot();
+        const last = state.undo[state.undo.length - 1];
+        if (!last || !areHistorySnapshotsEqual(last, current)) {
+          state.undo.push(current);
+          if (state.undo.length > HISTORY_MAX_STEPS) {
+            state.undo.shift();
+          }
+        }
+
+        if (state.undo.length <= 1) {
+          setStatus("Nothing to undo.");
+          return;
+        }
+
+        const snapshotToRedo = state.undo.pop();
+        state.redo.push(snapshotToRedo);
+        await applyHistorySnapshot(state.undo[state.undo.length - 1]);
+        setStatus("Undo applied.");
+      }
+
+      async function redoCurrentPage() {
+        ensureCurrentPageHistorySeed();
+        const page = pages[currentPageIndex];
+        if (!page) return;
+        const state = getPageHistoryState(page);
+        if (!state || !state.redo.length) {
+          setStatus("Nothing to redo.");
+          return;
+        }
+
+        const current = getCurrentHistorySnapshot();
+        const last = state.undo[state.undo.length - 1];
+        if (!last || !areHistorySnapshotsEqual(last, current)) {
+          state.undo.push(current);
+          if (state.undo.length > HISTORY_MAX_STEPS) {
+            state.undo.shift();
+          }
+        }
+
+        const snapshot = state.redo.pop();
+        state.undo.push(snapshot);
+        if (state.undo.length > HISTORY_MAX_STEPS) {
+          state.undo.shift();
+        }
+        await applyHistorySnapshot(snapshot);
+        setStatus("Redo applied.");
       }
 
       function clonePlainData(value) {
@@ -1407,14 +1603,24 @@
 
       function loadCanvasPayload(payload) {
         return new Promise((resolve, reject) => {
+          const previousSuspended = isHistorySuspended;
+          isHistorySuspended = true;
           try {
             const source = payload && typeof payload === "object" ? payload : createEmptyCanvasPayload();
             canvas.loadFromJSON(source, () => {
-              canvas.discardActiveObject();
-              canvas.requestRenderAll();
-              resolve();
+              try {
+                applyCanvasHitAreas();
+                canvas.discardActiveObject();
+                canvas.requestRenderAll();
+                resolve();
+              } catch (error) {
+                reject(error);
+              } finally {
+                isHistorySuspended = previousSuspended;
+              }
             });
           } catch (error) {
+            isHistorySuspended = previousSuspended;
             reject(error);
           }
         });
@@ -1441,6 +1647,7 @@
         updateInspector();
         renderMeasurementOverlay();
         updatePageManagerUi();
+        ensureCurrentPageHistorySeed();
 
         if (!config.silent) {
           setStatus((page.name || ("Page " + (currentPageIndex + 1))) + " loaded.");
@@ -1475,6 +1682,7 @@
         pages = [page];
         currentPageIndex = 0;
         updatePageManagerUi();
+        seedProjectHistoryFromPages();
       }
 
       function saveShowMeasurements() {
@@ -2664,9 +2872,13 @@
         const active = canvas.getActiveObject();
         const hasObject = Boolean(active);
         const isTextObject = hasObject && (active.type === "i-text" || active.type === "textbox" || active.type === "text");
+        const isRectObject = hasObject && active.type === "rect";
 
         objectTypeInput.value = hasObject ? getObjectLabel(active) : "None";
         textFieldRow.classList.toggle("hidden", !isTextObject);
+        if (rectCornerRadiusRow) {
+          rectCornerRadiusRow.classList.toggle("hidden", !isRectObject);
+        }
 
         if (!hasObject) {
           textContentInput.value = "";
@@ -2677,6 +2889,9 @@
           angleInput.value = "";
           opacityInput.value = "";
           strokeWidthInput.value = "";
+          if (rectCornerRadiusInput) {
+            rectCornerRadiusInput.value = "";
+          }
           fontSizeInput.value = "";
           refreshLayers();
           renderMeasurementOverlay();
@@ -2696,6 +2911,17 @@
         fillColorInput.value = normalizeColor(active.fill, "#1f2937");
         strokeColorInput.value = normalizeColor(active.stroke, "#000000");
         strokeWidthInput.value = active.strokeWidth == null ? 0 : active.strokeWidth;
+        if (rectCornerRadiusInput) {
+          if (isRectObject) {
+            const scaleX = Math.max(0.0001, active.scaleX || 1);
+            const scaleY = Math.max(0.0001, active.scaleY || 1);
+            const radiusX = Math.max(0, (active.rx || 0) * scaleX);
+            const radiusY = Math.max(0, (active.ry || 0) * scaleY);
+            rectCornerRadiusInput.value = Math.round((radiusX + radiusY) / 2);
+          } else {
+            rectCornerRadiusInput.value = "";
+          }
+        }
         fontFamilySelect.value = active.fontFamily || "Arial";
         fontSizeInput.value = active.fontSize || 36;
 
@@ -2769,6 +2995,7 @@
           stroke: "#264d35",
           strokeWidth: 3
         });
+        applyLineHitArea(line);
         canvas.add(line);
         canvas.setActiveObject(line);
         canvas.requestRenderAll();
@@ -3176,6 +3403,7 @@
               angle: toFiniteNumber(element.angle, 0)
             }
           );
+          applyLineHitArea(line);
           line.setCoords();
           return line;
         }
@@ -3234,6 +3462,12 @@
         updateInspector();
         if (pages.length) {
           saveCurrentPageState();
+          const activePage = pages[currentPageIndex];
+          const activeHistory = getPageHistoryState(activePage);
+          if (activeHistory) {
+            activeHistory.undo = [getCurrentHistorySnapshot()];
+            activeHistory.redo = [];
+          }
         } else {
           createProjectFromSingleCanvasState({ name: "Page 1" });
         }
@@ -3275,6 +3509,7 @@
                 .filter((page) => Boolean(page));
               pages = normalizedPages.length ? normalizedPages : [createPageRecord("Page 1", {})];
               currentPageIndex = clampNumber(Number(data.currentPageIndex), 0, pages.length - 1, 0);
+              seedProjectHistoryFromPages();
               updatePageManagerUi();
               await loadPageByIndex(currentPageIndex, { skipSave: true, silent: true });
               setStatus("Project JSON loaded (" + pages.length + " pages).");
@@ -3394,6 +3629,7 @@
         }
         canvas.requestRenderAll();
         refreshLayers();
+        recordHistoryCheckpoint();
       }
 
       function applyInspectorChanges() {
@@ -3415,6 +3651,9 @@
           opacity,
           strokeWidth
         });
+        if (active.type === "line") {
+          applyLineHitArea(active);
+        }
 
         if (active.width && active.height) {
           active.scaleX = width / active.width;
@@ -3436,11 +3675,30 @@
             fontSize: clampNumber(fontSizeInput.value, 6, 600, active.fontSize || 48)
           });
         }
+        if (active.type === "rect" && rectCornerRadiusInput) {
+          const scaledWidth = Math.max(1, (active.width || 1) * (active.scaleX || 1));
+          const scaledHeight = Math.max(1, (active.height || 1) * (active.scaleY || 1));
+          const maxDisplayRadius = Math.max(0, Math.min(scaledWidth, scaledHeight) / 2);
+          const displayRadius = clampNumber(
+            rectCornerRadiusInput.value,
+            0,
+            maxDisplayRadius,
+            Math.max(0, ((active.rx || 0) * (active.scaleX || 1) + (active.ry || 0) * (active.scaleY || 1)) / 2)
+          );
+          const safeScaleX = Math.max(0.0001, active.scaleX || 1);
+          const safeScaleY = Math.max(0.0001, active.scaleY || 1);
+          active.set({
+            rx: displayRadius / safeScaleX,
+            ry: displayRadius / safeScaleY
+          });
+          rectCornerRadiusInput.value = Math.round(displayRadius);
+        }
 
         active.setCoords();
         canvas.requestRenderAll();
         refreshLayers();
         renderMeasurementOverlay();
+        recordHistoryCheckpoint();
       }
 
       function setupEvents() {
@@ -3540,6 +3798,9 @@
               return;
             }
             const removed = pages.splice(currentPageIndex, 1)[0];
+            if (removed && removed.id) {
+              pageHistoryMap.delete(removed.id);
+            }
             const nextIndex = Math.max(0, Math.min(currentPageIndex, pages.length - 1));
             await loadPageByIndex(nextIndex, { skipSave: true, silent: true });
             setStatus((removed && removed.name ? removed.name : "Page") + " deleted.");
@@ -3606,17 +3867,20 @@
         pageSizeSelect.addEventListener("change", () => {
           applyPageSize(pageSizeSelect.value, orientationSelect.value, true);
           saveCurrentPageState();
+          recordHistoryCheckpoint();
         });
 
         orientationSelect.addEventListener("change", () => {
           applyPageSize(pageSizeSelect.value, orientationSelect.value, true);
           saveCurrentPageState();
+          recordHistoryCheckpoint();
         });
 
         backgroundColorInput.addEventListener("input", () => {
           canvas.backgroundColor = backgroundColorInput.value;
           canvas.requestRenderAll();
           saveCurrentPageState();
+          recordHistoryCheckpoint();
           setStatus("Background color updated.");
         });
         if (showMeasurementsToggle) {
@@ -3637,6 +3901,7 @@
           fillColorInput,
           strokeColorInput,
           strokeWidthInput,
+          rectCornerRadiusInput,
           fontFamilySelect,
           fontSizeInput
         ].forEach((control) => {
@@ -3649,7 +3914,20 @@
         canvas.on("selection:cleared", updateInspector);
         canvas.on("object:modified", updateInspector);
         canvas.on("object:added", updateInspector);
+        canvas.on("object:added", (event) => {
+          if (!event || !event.target) return;
+          applyLineHitArea(event.target);
+        });
         canvas.on("object:removed", updateInspector);
+        canvas.on("object:modified", () => {
+          recordHistoryCheckpoint();
+        });
+        canvas.on("object:added", () => {
+          recordHistoryCheckpoint();
+        });
+        canvas.on("object:removed", () => {
+          recordHistoryCheckpoint();
+        });
         canvas.on("mouse:move", (event) => {
           if (isPreviewMode) return;
           const pointer = canvas.getPointer(event.e);
@@ -3698,6 +3976,31 @@
             (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable);
           if (isTyping) return;
 
+          if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "z") {
+            event.preventDefault();
+            if (event.shiftKey) {
+              redoCurrentPage().catch((error) => {
+                const detail = error && error.message ? ": " + error.message : "";
+                setStatus("Redo failed" + detail);
+              });
+            } else {
+              undoCurrentPage().catch((error) => {
+                const detail = error && error.message ? ": " + error.message : "";
+                setStatus("Undo failed" + detail);
+              });
+            }
+            return;
+          }
+
+          if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "y") {
+            event.preventDefault();
+            redoCurrentPage().catch((error) => {
+              const detail = error && error.message ? ": " + error.message : "";
+              setStatus("Redo failed" + detail);
+            });
+            return;
+          }
+
           if (event.key === "Delete" || event.key === "Backspace") {
             event.preventDefault();
             removeSelected();
@@ -3744,7 +4047,8 @@
         canvas = new fabric.Canvas(canvasEl, {
           preserveObjectStacking: true,
           fireRightClick: false,
-          stopContextMenu: true
+          stopContextMenu: true,
+          targetFindTolerance: CANVAS_TARGET_TOLERANCE_PX
         });
 
         loadCreditCardCalibration();
