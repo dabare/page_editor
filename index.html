@@ -318,11 +318,44 @@
       grid-column: 2;
       grid-row: 2;
       width: fit-content;
+      position: relative;
       padding: 22px;
       border-radius: 18px;
       border: 1px solid rgba(22, 51, 32, 0.12);
       background: rgba(255, 255, 255, 0.7);
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    }
+
+    .measurement-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 40;
+      display: none;
+    }
+
+    .measurement-tag {
+      position: absolute;
+      transform: translate(-50%, -100%);
+      font-size: 10px;
+      line-height: 1;
+      font-weight: 700;
+      padding: 3px 5px;
+      border-radius: 5px;
+      color: #1f3726;
+      border: 1px solid rgba(62, 115, 79, 0.42);
+      background: rgba(239, 251, 241, 0.95);
+      box-shadow: 0 2px 6px rgba(27, 64, 40, 0.16);
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .measurement-tag.height {
+      transform: translate(0, -50%);
+    }
+
+    .measurement-tag.center {
+      transform: translate(-50%, -50%);
     }
 
     canvas {
@@ -390,6 +423,25 @@
     .field {
       display: grid;
       gap: 6px;
+    }
+
+    .field-inline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .field-inline label {
+      margin: 0;
+    }
+
+    .field-inline input[type="checkbox"] {
+      width: auto;
+      min-width: 18px;
+      height: 18px;
+      margin: 0;
+      accent-color: var(--accent);
     }
 
     .field label {
@@ -808,7 +860,7 @@
         <button id="downloadAiSchemaButton">AI Schema</button>
         <button id="downloadAiTemplateButton">AI Template</button>
         <button id="copyAiPromptButton">Copy AI Prompt</button>
-        <button id="exportPngButton" class="primary">Export PNG</button>
+        <button id="exportPngButton" class="primary">Export PNG ZIP</button>
         <button id="exportPdfButton" class="primary">Export PDF</button>
         <button id="previewModeButton">Preview</button>
       </div>
@@ -829,6 +881,16 @@
         <div class="panel">
           <h2>Page</h2>
           <div class="field">
+            <label for="pageNavigatorSelect">Current Page</label>
+            <select id="pageNavigatorSelect"></select>
+          </div>
+          <div class="z-actions">
+            <button id="addPageButton">Add Page</button>
+            <button id="duplicatePageButton">Duplicate</button>
+            <button id="deletePageButton" class="danger">Delete</button>
+          </div>
+          <p class="hint" id="pageCountHint">1 page</p>
+          <div class="field">
             <label for="pageSizeSelect">Page Size</label>
             <select id="pageSizeSelect"></select>
           </div>
@@ -842,6 +904,10 @@
           <div class="field">
             <label for="backgroundColorInput">Page Color</label>
             <input id="backgroundColorInput" type="color" value="#ffffff">
+          </div>
+          <div class="field field-inline">
+            <label for="showMeasurementsToggle">Show Measurements</label>
+            <input id="showMeasurementsToggle" type="checkbox" aria-label="Show object measurements">
           </div>
           <p class="hint" id="pageSizeHint">Canvas at 96 DPI for editing. Export uses full selected page size.</p>
         </div>
@@ -874,9 +940,12 @@
             Ctrl/Cmd + C then Ctrl/Cmd + V: copy/paste<br>
             Ctrl/Cmd + D: duplicate selected<br>
             AI JSON: page-design-ai-v1 via Load JSON<br>
+            Multi-page: use Page panel Add/Duplicate/Delete<br>
+            PNG export: one ZIP with all pages<br>
             Preview: click Preview, press Esc to exit<br>
             Ruler unit: switch cm/inch in top bar<br>
             Move/resize snaps to ruler points<br>
+            Measurements overlay never exports to PNG/PDF<br>
             Preview size: use slider in Preview<br>
             One-click real size: Card Setup once, then Use Saved
           </p>
@@ -890,6 +959,7 @@
           <div class="ruler ruler-left" id="rulerLeft" aria-hidden="true"></div>
           <div class="canvas-wrap" id="canvasWrap">
             <canvas id="designCanvas" width="794" height="1123" aria-label="Design canvas"></canvas>
+            <div id="measurementOverlay" class="measurement-overlay" aria-hidden="true"></div>
           </div>
         </div>
       </main>
@@ -1050,9 +1120,15 @@
       const rightSidebar = document.getElementById("rightSidebar");
       const leftSidebarHandle = document.getElementById("leftSidebarHandle");
       const rightSidebarHandle = document.getElementById("rightSidebarHandle");
+      const pageNavigatorSelect = document.getElementById("pageNavigatorSelect");
+      const addPageButton = document.getElementById("addPageButton");
+      const duplicatePageButton = document.getElementById("duplicatePageButton");
+      const deletePageButton = document.getElementById("deletePageButton");
+      const pageCountHint = document.getElementById("pageCountHint");
       const pageSizeSelect = document.getElementById("pageSizeSelect");
       const orientationSelect = document.getElementById("orientationSelect");
       const backgroundColorInput = document.getElementById("backgroundColorInput");
+      const showMeasurementsToggle = document.getElementById("showMeasurementsToggle");
       const pageSizeHint = document.getElementById("pageSizeHint");
       const addTextButton = document.getElementById("addTextButton");
       const addRectButton = document.getElementById("addRectButton");
@@ -1080,6 +1156,7 @@
       const cardCalibrationButton = document.getElementById("cardCalibrationButton");
       const applyCardCalibrationButton = document.getElementById("applyCardCalibrationButton");
       const creditCardOverlay = document.getElementById("creditCardOverlay");
+      const measurementOverlay = document.getElementById("measurementOverlay");
       const jsonInput = document.getElementById("jsonInput");
       const exportDpiSelect = document.getElementById("exportDpiSelect");
       const exportPngButton = document.getElementById("exportPngButton");
@@ -1106,7 +1183,9 @@
       const SIDEBAR_STATE_KEY = "pageDesignEditorSidebarStateV1";
       const REAL_SIZE_PERCENT_KEY = "pageDesignEditorRealSizePercentV1";
       const RULER_UNIT_KEY = "pageDesignEditorRulerUnitV1";
+      const SHOW_MEASUREMENTS_KEY = "pageDesignEditorShowMeasurementsV1";
       const CREDIT_CARD_CALIBRATION_KEY = "pageDesignEditorCreditCardCalibrationV1";
+      const PROJECT_JSON_VERSION = 2;
       const CARD_WIDTH_MM = 85.6;
       const CARD_HEIGHT_MM = 53.98;
       const MAX_EXPORT_SIDE_PX = 14000;
@@ -1226,12 +1305,15 @@
         "Use x/y in editor pixels (96 DPI canvas), valid pageSize values from the tool (a3,a4,a5,a6,b4,b5,letter,legal,tabloid,executive,statement,folio). " +
         "Use hex colors where possible. Keep numbers finite. Output strict JSON only, no markdown.";
       let copiedObject = null;
+      let pages = [];
+      let currentPageIndex = 0;
       let selectedPageSizeKey = "a4";
       let selectedOrientation = "portrait";
       let isPreviewMode = false;
       let isCardCalibrationMode = false;
       let savedCardCalibrationPercent = null;
       let rulerUnit = "cm";
+      let showMeasurements = false;
       let realSizePercent = 100;
       let sidebarState = {
         leftCollapsed: false,
@@ -1256,6 +1338,283 @@
 
       function getCurrentPageSpec() {
         return getPageSpec(selectedPageSizeKey, selectedOrientation);
+      }
+
+      function clonePlainData(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+
+      function createEmptyCanvasPayload() {
+        return {
+          version: window.fabric && window.fabric.version ? window.fabric.version : "5.3.0",
+          objects: []
+        };
+      }
+
+      function createPageRecord(name, options) {
+        const source = options || {};
+        const pageName = String(name || "").trim() || ("Page " + (pages.length + 1));
+        const pageSize = PAGE_SIZES[source.pageSize] ? source.pageSize : "a4";
+        const orientation = source.orientation === "landscape" ? "landscape" : "portrait";
+        const backgroundColor = normalizeColor(source.backgroundColor, "#ffffff");
+        const canvasPayload = source.canvas ? clonePlainData(source.canvas) : createEmptyCanvasPayload();
+        return {
+          id: source.id || ("page-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7)),
+          name: pageName,
+          pageSize,
+          orientation,
+          backgroundColor,
+          canvas: canvasPayload
+        };
+      }
+
+      function getPageCountLabel() {
+        if (pages.length === 1) return "1 page";
+        return pages.length + " pages";
+      }
+
+      function updatePageManagerUi() {
+        if (pageNavigatorSelect) {
+          pageNavigatorSelect.innerHTML = "";
+          pages.forEach((page, index) => {
+            const option = document.createElement("option");
+            option.value = String(index);
+            option.textContent = page.name || ("Page " + (index + 1));
+            pageNavigatorSelect.appendChild(option);
+          });
+          if (pages.length) {
+            pageNavigatorSelect.value = String(clampNumber(currentPageIndex, 0, pages.length - 1, 0));
+          }
+        }
+        if (pageCountHint) {
+          pageCountHint.textContent = getPageCountLabel();
+        }
+        if (deletePageButton) {
+          deletePageButton.disabled = pages.length <= 1;
+        }
+      }
+
+      function saveCurrentPageState() {
+        if (!canvas || !pages.length) return;
+        const target = pages[currentPageIndex];
+        if (!target) return;
+        target.pageSize = selectedPageSizeKey;
+        target.orientation = selectedOrientation;
+        target.backgroundColor = normalizeColor(backgroundColorInput.value, "#ffffff");
+        target.canvas = canvas.toJSON();
+        updatePageManagerUi();
+      }
+
+      function loadCanvasPayload(payload) {
+        return new Promise((resolve, reject) => {
+          try {
+            const source = payload && typeof payload === "object" ? payload : createEmptyCanvasPayload();
+            canvas.loadFromJSON(source, () => {
+              canvas.discardActiveObject();
+              canvas.requestRenderAll();
+              resolve();
+            });
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+
+      async function loadPageByIndex(index, options) {
+        const config = options || {};
+        if (!pages.length) return;
+        const nextIndex = clampNumber(index, 0, pages.length - 1, 0);
+        if (!config.skipSave) {
+          saveCurrentPageState();
+        }
+
+        currentPageIndex = nextIndex;
+        const page = pages[currentPageIndex];
+        if (!page) return;
+
+        pageSizeSelect.value = page.pageSize;
+        orientationSelect.value = page.orientation;
+        backgroundColorInput.value = page.backgroundColor;
+        applyPageSize(page.pageSize, page.orientation, false, true);
+        canvas.backgroundColor = page.backgroundColor;
+        await loadCanvasPayload(page.canvas);
+        updateInspector();
+        renderMeasurementOverlay();
+        updatePageManagerUi();
+
+        if (!config.silent) {
+          setStatus((page.name || ("Page " + (currentPageIndex + 1))) + " loaded.");
+        }
+      }
+
+      function getUniquePageName(baseName) {
+        const base = String(baseName || "Page").trim() || "Page";
+        const names = new Set(pages.map((page) => String(page.name || "").trim().toLowerCase()));
+        if (!names.has(base.toLowerCase())) {
+          return base;
+        }
+        let attempt = 2;
+        while (attempt < 1000) {
+          const candidate = base + " " + attempt;
+          if (!names.has(candidate.toLowerCase())) {
+            return candidate;
+          }
+          attempt += 1;
+        }
+        return base + " " + Date.now();
+      }
+
+      function createProjectFromSingleCanvasState(options) {
+        const config = options || {};
+        const page = createPageRecord(config.name || "Page 1", {
+          pageSize: selectedPageSizeKey,
+          orientation: selectedOrientation,
+          backgroundColor: normalizeColor(backgroundColorInput.value, "#ffffff"),
+          canvas: canvas ? canvas.toJSON() : createEmptyCanvasPayload()
+        });
+        pages = [page];
+        currentPageIndex = 0;
+        updatePageManagerUi();
+      }
+
+      function saveShowMeasurements() {
+        try {
+          localStorage.setItem(SHOW_MEASUREMENTS_KEY, showMeasurements ? "1" : "0");
+        } catch (error) {
+        }
+      }
+
+      function loadShowMeasurements() {
+        try {
+          showMeasurements = localStorage.getItem(SHOW_MEASUREMENTS_KEY) === "1";
+        } catch (error) {
+          showMeasurements = false;
+        }
+      }
+
+      function clearMeasurementOverlay() {
+        if (!measurementOverlay) return;
+        while (measurementOverlay.firstChild) {
+          measurementOverlay.removeChild(measurementOverlay.firstChild);
+        }
+      }
+
+      function formatMeasurementLengthPx(lengthPx, axis) {
+        const safeLength = Math.max(0, Number(lengthPx) || 0);
+        const pxPerMm = getCanvasPxPerMm(axis);
+        if (!Number.isFinite(pxPerMm) || pxPerMm <= 0) {
+          return Math.round(safeLength) + " px";
+        }
+        const mm = safeLength / pxPerMm;
+        if (rulerUnit === "in") {
+          return (mm / MM_PER_INCH).toFixed(2) + " in";
+        }
+        return (mm / 10).toFixed(1) + " cm";
+      }
+
+      function getMeasurementObjects() {
+        if (!canvas) return [];
+        const active = canvas.getActiveObject();
+        if (active && active.type === "activeSelection" && Array.isArray(active._objects)) {
+          return active._objects.slice();
+        }
+        if (active) {
+          return [active];
+        }
+        return canvas.getObjects();
+      }
+
+      function appendMeasurementTag(text, x, y, className) {
+        if (!measurementOverlay || !text) return;
+        const maxX = Math.max(8, measurementOverlay.clientWidth - 8);
+        const maxY = Math.max(8, measurementOverlay.clientHeight - 8);
+        const tag = document.createElement("span");
+        tag.className = "measurement-tag" + (className ? " " + className : "");
+        tag.textContent = text;
+        tag.style.left = clampNumber(x, 8, maxX, x) + "px";
+        tag.style.top = clampNumber(y, 8, maxY, y) + "px";
+        measurementOverlay.appendChild(tag);
+      }
+
+      function renderMeasurementOverlay() {
+        if (!measurementOverlay) return;
+        clearMeasurementOverlay();
+        if (!showMeasurements || isPreviewMode || !canvas || !canvas.wrapperEl) {
+          measurementOverlay.style.display = "none";
+          return;
+        }
+
+        const wrapper = canvas.wrapperEl;
+        const baseX = wrapper.offsetLeft || 0;
+        const baseY = wrapper.offsetTop || 0;
+        const objects = getMeasurementObjects();
+        if (!objects.length) {
+          measurementOverlay.style.display = "none";
+          return;
+        }
+
+        measurementOverlay.style.display = "block";
+        objects.forEach((object) => {
+          if (!object) return;
+          const bounds = typeof object.getBoundingRect === "function"
+            ? object.getBoundingRect(true, true)
+            : null;
+          if (!bounds || !Number.isFinite(bounds.left) || !Number.isFinite(bounds.top)) {
+            return;
+          }
+
+          const scaledWidth = Math.abs(
+            Number(
+              typeof object.getScaledWidth === "function"
+                ? object.getScaledWidth()
+                : (object.width || 0) * (object.scaleX || 1)
+            ) || 0
+          );
+          const scaledHeight = Math.abs(
+            Number(
+              typeof object.getScaledHeight === "function"
+                ? object.getScaledHeight()
+                : (object.height || 0) * (object.scaleY || 1)
+            ) || 0
+          );
+          const centerX = baseX + bounds.left + (bounds.width / 2);
+          const centerY = baseY + bounds.top + (bounds.height / 2);
+          const topY = baseY + bounds.top - 4;
+          const rightX = baseX + bounds.left + bounds.width + 6;
+
+          if (object.type === "line") {
+            const lengthPx = Math.sqrt((scaledWidth * scaledWidth) + (scaledHeight * scaledHeight));
+            appendMeasurementTag("L " + formatMeasurementLengthPx(lengthPx, "x"), centerX, topY, "center");
+            return;
+          }
+
+          if (object.type === "circle") {
+            const radiusX = Math.abs((Number(object.radius) || 0) * (Number(object.scaleX) || 1));
+            const radiusY = Math.abs((Number(object.radius) || 0) * (Number(object.scaleY) || 1));
+            const radiusPx = Math.max(0, (radiusX + radiusY) / 2);
+            appendMeasurementTag(
+              "R " + formatMeasurementLengthPx(radiusPx, "x") + " | D " + formatMeasurementLengthPx(radiusPx * 2, "x"),
+              centerX,
+              topY,
+              "center"
+            );
+            return;
+          }
+
+          appendMeasurementTag("W " + formatMeasurementLengthPx(scaledWidth, "x"), centerX, topY);
+          appendMeasurementTag("H " + formatMeasurementLengthPx(scaledHeight, "y"), rightX, centerY, "height");
+        });
+      }
+
+      function applyShowMeasurements(value, persist) {
+        showMeasurements = Boolean(value);
+        if (showMeasurementsToggle) {
+          showMeasurementsToggle.checked = showMeasurements;
+        }
+        if (persist) {
+          saveShowMeasurements();
+        }
+        renderMeasurementOverlay();
       }
 
       function saveRealSizePercent() {
@@ -1294,6 +1653,7 @@
         }
         syncCreditCardOverlay();
         updateCreditCardCalibrationUi();
+        renderMeasurementOverlay();
       }
 
       function saveCreditCardCalibration() {
@@ -1409,6 +1769,7 @@
           saveRulerUnit();
         }
         renderRulerCursor();
+        renderMeasurementOverlay();
         window.requestAnimationFrame(updateRulers);
       }
 
@@ -1810,6 +2171,7 @@
         canvas.requestRenderAll();
         syncCreditCardOverlay();
         updateCreditCardCalibrationUi();
+        renderMeasurementOverlay();
         window.requestAnimationFrame(updateRulers);
       }
 
@@ -2047,6 +2409,132 @@
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
 
+      function concatUint8Arrays(chunks) {
+        const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+        const output = new Uint8Array(total);
+        let offset = 0;
+        chunks.forEach((chunk) => {
+          output.set(chunk, offset);
+          offset += chunk.length;
+        });
+        return output;
+      }
+
+      function createCrc32Table() {
+        const table = new Uint32Array(256);
+        for (let i = 0; i < 256; i += 1) {
+          let value = i;
+          for (let j = 0; j < 8; j += 1) {
+            if ((value & 1) !== 0) {
+              value = (value >>> 1) ^ 0xedb88320;
+            } else {
+              value = value >>> 1;
+            }
+          }
+          table[i] = value >>> 0;
+        }
+        return table;
+      }
+
+      const CRC32_TABLE = createCrc32Table();
+
+      function computeCrc32(bytes) {
+        let crc = 0xffffffff;
+        for (let i = 0; i < bytes.length; i += 1) {
+          const idx = (crc ^ bytes[i]) & 0xff;
+          crc = (crc >>> 8) ^ CRC32_TABLE[idx];
+        }
+        return (crc ^ 0xffffffff) >>> 0;
+      }
+
+      function getDosDateTime() {
+        const now = new Date();
+        const year = Math.max(1980, now.getFullYear());
+        const month = now.getMonth() + 1;
+        const day = now.getDate();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const seconds = Math.floor(now.getSeconds() / 2);
+        const dosTime = ((hours & 0x1f) << 11) | ((minutes & 0x3f) << 5) | (seconds & 0x1f);
+        const dosDate = (((year - 1980) & 0x7f) << 9) | ((month & 0x0f) << 5) | (day & 0x1f);
+        return { dosTime, dosDate };
+      }
+
+      function createZipBlob(files) {
+        const encoder = new TextEncoder();
+        const localChunks = [];
+        const centralChunks = [];
+        let localOffset = 0;
+        const { dosTime, dosDate } = getDosDateTime();
+
+        files.forEach((file) => {
+          const fileNameBytes = encoder.encode(file.name);
+          const dataBytes = file.bytes;
+          const crc32 = computeCrc32(dataBytes);
+
+          const localHeader = new ArrayBuffer(30);
+          const localView = new DataView(localHeader);
+          localView.setUint32(0, 0x04034b50, true);
+          localView.setUint16(4, 20, true);
+          localView.setUint16(6, 0, true);
+          localView.setUint16(8, 0, true);
+          localView.setUint16(10, dosTime, true);
+          localView.setUint16(12, dosDate, true);
+          localView.setUint32(14, crc32, true);
+          localView.setUint32(18, dataBytes.length, true);
+          localView.setUint32(22, dataBytes.length, true);
+          localView.setUint16(26, fileNameBytes.length, true);
+          localView.setUint16(28, 0, true);
+
+          localChunks.push(new Uint8Array(localHeader), fileNameBytes, dataBytes);
+
+          const centralHeader = new ArrayBuffer(46);
+          const centralView = new DataView(centralHeader);
+          centralView.setUint32(0, 0x02014b50, true);
+          centralView.setUint16(4, 20, true);
+          centralView.setUint16(6, 20, true);
+          centralView.setUint16(8, 0, true);
+          centralView.setUint16(10, 0, true);
+          centralView.setUint16(12, dosTime, true);
+          centralView.setUint16(14, dosDate, true);
+          centralView.setUint32(16, crc32, true);
+          centralView.setUint32(20, dataBytes.length, true);
+          centralView.setUint32(24, dataBytes.length, true);
+          centralView.setUint16(28, fileNameBytes.length, true);
+          centralView.setUint16(30, 0, true);
+          centralView.setUint16(32, 0, true);
+          centralView.setUint16(34, 0, true);
+          centralView.setUint16(36, 0, true);
+          centralView.setUint32(38, 0, true);
+          centralView.setUint32(42, localOffset, true);
+
+          centralChunks.push(new Uint8Array(centralHeader), fileNameBytes);
+          localOffset += 30 + fileNameBytes.length + dataBytes.length;
+        });
+
+        const localData = concatUint8Arrays(localChunks);
+        const centralData = concatUint8Arrays(centralChunks);
+        const endRecord = new ArrayBuffer(22);
+        const endView = new DataView(endRecord);
+        endView.setUint32(0, 0x06054b50, true);
+        endView.setUint16(4, 0, true);
+        endView.setUint16(6, 0, true);
+        endView.setUint16(8, files.length, true);
+        endView.setUint16(10, files.length, true);
+        endView.setUint32(12, centralData.length, true);
+        endView.setUint32(16, localData.length, true);
+        endView.setUint16(20, 0, true);
+
+        return new Blob([localData, centralData, new Uint8Array(endRecord)], {
+          type: "application/zip"
+        });
+      }
+
+      async function blobToUint8Array(blob) {
+        const buffer = await blob.arrayBuffer();
+        return new Uint8Array(buffer);
+      }
+
       function initGoogleAds() {
         if (!window.adsbygoogle || !Array.isArray(window.adsbygoogle)) {
           return;
@@ -2130,7 +2618,7 @@
           " px at 96 DPI).";
       }
 
-      function applyPageSize(pageSizeKey, orientation, shouldScaleObjects) {
+      function applyPageSize(pageSizeKey, orientation, shouldScaleObjects, suppressStatus) {
         const spec = getPageSpec(pageSizeKey, orientation);
         const oldWidth = canvas.getWidth();
         const oldHeight = canvas.getHeight();
@@ -2154,7 +2642,10 @@
         selectedOrientation = orientation;
         syncCanvasDisplayMode();
         updatePageSizeHint();
-        setStatus("Canvas resized to " + spec.label + " (" + orientation + ").");
+        renderMeasurementOverlay();
+        if (!suppressStatus) {
+          setStatus("Canvas resized to " + spec.label + " (" + orientation + ").");
+        }
       }
 
       function populatePageSizes() {
@@ -2188,6 +2679,7 @@
           strokeWidthInput.value = "";
           fontSizeInput.value = "";
           refreshLayers();
+          renderMeasurementOverlay();
           return;
         }
 
@@ -2208,6 +2700,7 @@
         fontSizeInput.value = active.fontSize || 36;
 
         refreshLayers();
+        renderMeasurementOverlay();
       }
 
       function normalizeColor(colorValue, fallback) {
@@ -2359,12 +2852,24 @@
         return { orientation, pageSize, backgroundColor };
       }
 
+      function normalizePagePayload(pageData, index) {
+        const fallbackName = "Page " + (index + 1);
+        return createPageRecord(pageData && pageData.name ? pageData.name : fallbackName, {
+          id: pageData && pageData.id,
+          pageSize: pageData && pageData.pageSize,
+          orientation: pageData && pageData.orientation,
+          backgroundColor: pageData && pageData.backgroundColor,
+          canvas: pageData && pageData.canvas ? pageData.canvas : createEmptyCanvasPayload()
+        });
+      }
+
       function applyProjectMeta(meta) {
         pageSizeSelect.value = meta.pageSize;
         orientationSelect.value = meta.orientation;
-        applyPageSize(meta.pageSize, meta.orientation, false);
+        applyPageSize(meta.pageSize, meta.orientation, false, true);
         backgroundColorInput.value = meta.backgroundColor;
         canvas.backgroundColor = meta.backgroundColor;
+        renderMeasurementOverlay();
       }
 
       function getSafeColor(value, fallback) {
@@ -2727,6 +3232,11 @@
 
         canvas.requestRenderAll();
         updateInspector();
+        if (pages.length) {
+          saveCurrentPageState();
+        } else {
+          createProjectFromSingleCanvasState({ name: "Page 1" });
+        }
         setStatus(
           "AI JSON imported. " +
           imported +
@@ -2736,16 +3246,15 @@
       }
 
       function saveProjectJson() {
+        saveCurrentPageState();
         const payload = {
-          version: 1,
-          type: "single-design",
-          pageSize: selectedPageSizeKey,
-          orientation: selectedOrientation,
-          backgroundColor: backgroundColorInput.value,
-          canvas: canvas.toJSON()
+          version: PROJECT_JSON_VERSION,
+          type: "multi-page-design",
+          currentPageIndex,
+          pages: pages.map((page, index) => normalizePagePayload(page, index))
         };
         downloadJsonFile("page-design-project.json", payload);
-        setStatus("Project JSON saved.");
+        setStatus("Project JSON saved (" + pages.length + " page" + (pages.length === 1 ? "" : "s") + ").");
       }
 
       function loadProjectJson(file) {
@@ -2760,12 +3269,25 @@
               return;
             }
 
+            if (Array.isArray(data.pages)) {
+              const normalizedPages = data.pages
+                .map((page, index) => normalizePagePayload(page, index))
+                .filter((page) => Boolean(page));
+              pages = normalizedPages.length ? normalizedPages : [createPageRecord("Page 1", {})];
+              currentPageIndex = clampNumber(Number(data.currentPageIndex), 0, pages.length - 1, 0);
+              updatePageManagerUi();
+              await loadPageByIndex(currentPageIndex, { skipSave: true, silent: true });
+              setStatus("Project JSON loaded (" + pages.length + " pages).");
+              return;
+            }
+
             const meta = getProjectMetaFromData(data);
             clearCanvas();
             applyProjectMeta(meta);
             await loadFabricProjectFromData(data);
+            createProjectFromSingleCanvasState({ name: "Page 1" });
             updateInspector();
-            setStatus("Project JSON loaded.");
+            setStatus("Project JSON loaded (1 page).");
           } catch (error) {
             const detail = error && error.message ? ": " + error.message : "";
             setStatus("Failed to load JSON" + detail);
@@ -2775,15 +3297,61 @@
       }
 
       async function exportPng() {
-        const selectedDpi = getSelectedExportDpi();
-        const rendered = createExportCanvasForDpi(selectedDpi);
-        const blob = await canvasToBlobAsync(rendered.canvas, "image/png");
-        downloadBlob("page-design.png", blob);
-        if (rendered.actualDpi !== selectedDpi) {
-          setStatus("PNG exported at " + rendered.actualDpi + " DPI (requested " + selectedDpi + ").");
+        saveCurrentPageState();
+        if (!pages.length) {
+          setStatus("No pages to export.");
           return;
         }
-        setStatus("PNG exported at " + rendered.actualDpi + " DPI.");
+        const selectedDpi = getSelectedExportDpi();
+        const originalPageIndex = currentPageIndex;
+        const files = [];
+        const dpiMessages = [];
+
+        try {
+          for (let index = 0; index < pages.length; index += 1) {
+            await loadPageByIndex(index, { skipSave: true, silent: true });
+            const rendered = createExportCanvasForDpi(selectedDpi);
+            const blob = await canvasToBlobAsync(rendered.canvas, "image/png");
+            const bytes = await blobToUint8Array(blob);
+            const safeName = (pages[index].name || ("page-" + (index + 1)))
+              .toLowerCase()
+              .replace(/[^a-z0-9\-_]+/g, "-")
+              .replace(/^-+|-+$/g, "") || ("page-" + (index + 1));
+            const orderedName = String(index + 1).padStart(2, "0") + "-" + safeName;
+            files.push({
+              name: orderedName + ".png",
+              bytes
+            });
+            if (rendered.actualDpi !== selectedDpi) {
+              dpiMessages.push((index + 1) + ":" + rendered.actualDpi);
+            }
+          }
+        } finally {
+          try {
+            await loadPageByIndex(
+              clampNumber(originalPageIndex, 0, pages.length - 1, 0),
+              { skipSave: true, silent: true }
+            );
+          } catch (error) {
+          }
+        }
+
+        if (!files.length) {
+          throw new Error("No pages were available for PNG export.");
+        }
+        const zipBlob = createZipBlob(files);
+        downloadBlob("page-design-pages.zip", zipBlob);
+        if (dpiMessages.length) {
+          setStatus(
+            "PNG ZIP exported (" +
+            files.length +
+            " files). DPI adjusted on page(s): " +
+            dpiMessages.join(", ") +
+            "."
+          );
+          return;
+        }
+        setStatus("PNG ZIP exported (" + files.length + " files) at " + selectedDpi + " DPI.");
       }
 
       function exportPdf() {
@@ -2872,6 +3440,7 @@
         active.setCoords();
         canvas.requestRenderAll();
         refreshLayers();
+        renderMeasurementOverlay();
       }
 
       function setupEvents() {
@@ -2916,11 +3485,66 @@
           pageSizeSelect.value = "a4";
           orientationSelect.value = "portrait";
           backgroundColorInput.value = "#ffffff";
-          applyPageSize("a4", "portrait", false);
+          applyPageSize("a4", "portrait", false, true);
           canvas.backgroundColor = "#ffffff";
           canvas.requestRenderAll();
+          createProjectFromSingleCanvasState({ name: "Page 1" });
+          updateInspector();
           setStatus("New design created.");
         });
+
+        if (pageNavigatorSelect) {
+          pageNavigatorSelect.addEventListener("change", safeAction(async () => {
+            await loadPageByIndex(Number(pageNavigatorSelect.value), { skipSave: false, silent: true });
+            const page = pages[currentPageIndex];
+            setStatus((page && page.name ? page.name : ("Page " + (currentPageIndex + 1))) + " selected.");
+          }, "Page switch failed"));
+        }
+        if (addPageButton) {
+          addPageButton.addEventListener("click", safeAction(async () => {
+            saveCurrentPageState();
+            const source = pages[currentPageIndex] || createPageRecord("Page 1", {});
+            const newPage = createPageRecord(getUniquePageName("Page " + (pages.length + 1)), {
+              pageSize: source.pageSize,
+              orientation: source.orientation,
+              backgroundColor: source.backgroundColor,
+              canvas: createEmptyCanvasPayload()
+            });
+            const insertIndex = currentPageIndex + 1;
+            pages.splice(insertIndex, 0, newPage);
+            await loadPageByIndex(insertIndex, { skipSave: true, silent: true });
+            setStatus(newPage.name + " added.");
+          }, "Add page failed"));
+        }
+        if (duplicatePageButton) {
+          duplicatePageButton.addEventListener("click", safeAction(async () => {
+            if (!pages.length) return;
+            saveCurrentPageState();
+            const source = pages[currentPageIndex];
+            const duplicate = createPageRecord(getUniquePageName((source.name || ("Page " + (currentPageIndex + 1))) + " Copy"), {
+              pageSize: source.pageSize,
+              orientation: source.orientation,
+              backgroundColor: source.backgroundColor,
+              canvas: source.canvas
+            });
+            const insertIndex = currentPageIndex + 1;
+            pages.splice(insertIndex, 0, duplicate);
+            await loadPageByIndex(insertIndex, { skipSave: true, silent: true });
+            setStatus(duplicate.name + " duplicated.");
+          }, "Duplicate page failed"));
+        }
+        if (deletePageButton) {
+          deletePageButton.addEventListener("click", safeAction(async () => {
+            if (pages.length <= 1) {
+              setStatus("At least one page is required.");
+              return;
+            }
+            const removed = pages.splice(currentPageIndex, 1)[0];
+            const nextIndex = Math.max(0, Math.min(currentPageIndex, pages.length - 1));
+            await loadPageByIndex(nextIndex, { skipSave: true, silent: true });
+            setStatus((removed && removed.name ? removed.name : "Page") + " deleted.");
+          }, "Delete page failed"));
+        }
 
         saveJsonButton.addEventListener("click", safeAction(saveProjectJson, "Save JSON failed"));
         saveAiJsonButton.addEventListener("click", safeAction(saveAiJson, "Export AI JSON failed"));
@@ -2981,17 +3605,26 @@
 
         pageSizeSelect.addEventListener("change", () => {
           applyPageSize(pageSizeSelect.value, orientationSelect.value, true);
+          saveCurrentPageState();
         });
 
         orientationSelect.addEventListener("change", () => {
           applyPageSize(pageSizeSelect.value, orientationSelect.value, true);
+          saveCurrentPageState();
         });
 
         backgroundColorInput.addEventListener("input", () => {
           canvas.backgroundColor = backgroundColorInput.value;
           canvas.requestRenderAll();
+          saveCurrentPageState();
           setStatus("Background color updated.");
         });
+        if (showMeasurementsToggle) {
+          showMeasurementsToggle.addEventListener("change", safeAction(() => {
+            applyShowMeasurements(showMeasurementsToggle.checked, true);
+            setStatus("Measurements " + (showMeasurements ? "shown." : "hidden."));
+          }, "Measurement toggle failed"));
+        }
 
         [
           textContentInput,
@@ -3033,6 +3666,7 @@
             top: snapToRulerAxis(target.top || 0, "y")
           });
           target.setCoords();
+          renderMeasurementOverlay();
         });
         canvas.on("object:scaling", (event) => {
           const target = event && event.target;
@@ -3040,9 +3674,13 @@
           isApplyingScaleSnap = true;
           try {
             snapObjectSizeToRuler(target);
+            renderMeasurementOverlay();
           } finally {
             isApplyingScaleSnap = false;
           }
+        });
+        canvas.on("object:rotating", () => {
+          renderMeasurementOverlay();
         });
 
         document.addEventListener("keydown", (event) => {
@@ -3112,6 +3750,8 @@
         loadCreditCardCalibration();
         loadRulerUnit();
         applyRulerUnit(rulerUnit, false);
+        loadShowMeasurements();
+        applyShowMeasurements(showMeasurements, false);
         loadRealSizePercent();
         applyRealSizePercent(realSizePercent, false);
         loadSidebarState();
@@ -3119,8 +3759,9 @@
         updateCreditCardCalibrationUi();
         updatePreviewButtons();
         populatePageSizes();
-        applyPageSize("a4", "portrait", false);
+        applyPageSize("a4", "portrait", false, true);
         canvas.backgroundColor = "#ffffff";
+        createProjectFromSingleCanvasState({ name: "Page 1" });
         syncCanvasDisplayMode();
         setupEvents();
         initGoogleAds();
