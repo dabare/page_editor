@@ -937,6 +937,7 @@
           <h2>Shortcuts</h2>
           <p class="hint">
             Delete: remove selected object<br>
+            Arrow Keys: move selected object (Shift = 10px)<br>
             Ctrl/Cmd + C then Ctrl/Cmd + V: copy/paste<br>
             Ctrl/Cmd + D: duplicate selected<br>
             Ctrl/Cmd + Z: undo, Ctrl/Cmd + Shift + Z: redo<br>
@@ -3632,6 +3633,33 @@
         recordHistoryCheckpoint();
       }
 
+      function nudgeSelectionBy(deltaX, deltaY) {
+        const active = canvas.getActiveObject();
+        if (!active) return false;
+
+        const objects =
+          active.type === "activeSelection" && Array.isArray(active._objects)
+            ? active._objects.slice()
+            : [active];
+        if (!objects.length) return false;
+
+        objects.forEach((object) => {
+          object.set({
+            left: (object.left || 0) + deltaX,
+            top: (object.top || 0) + deltaY
+          });
+          object.setCoords();
+        });
+        if (active.type === "activeSelection") {
+          active.setCoords();
+        }
+
+        canvas.requestRenderAll();
+        updateInspector();
+        recordHistoryCheckpoint();
+        return true;
+      }
+
       function applyInspectorChanges() {
         const active = canvas.getActiveObject();
         if (!active) return;
@@ -3999,6 +4027,30 @@
               setStatus("Redo failed" + detail);
             });
             return;
+          }
+
+          if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+            const step = event.shiftKey ? 10 : 1;
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              nudgeSelectionBy(-step, 0);
+              return;
+            }
+            if (event.key === "ArrowRight") {
+              event.preventDefault();
+              nudgeSelectionBy(step, 0);
+              return;
+            }
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              nudgeSelectionBy(0, -step);
+              return;
+            }
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              nudgeSelectionBy(0, step);
+              return;
+            }
           }
 
           if (event.key === "Delete" || event.key === "Backspace") {
